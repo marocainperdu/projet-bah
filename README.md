@@ -66,9 +66,8 @@ Créer un fichier `.env` :
 DB_HOST=localhost
 DB_USER=root
 DB_PASSWORD=your_password
-DB_NAME=mbacke-demandes
+DB_NAME=projet-bah
 DB_PORT=3306
-JWT_SECRET=your_jwt_secret
 PORT=3000
 ```
 

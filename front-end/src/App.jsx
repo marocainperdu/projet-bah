@@ -7,6 +7,7 @@ import Logout from './pages/Logout';
 // Nouvelles pages pour le système de demandes
 import DirectorDashboard from './pages/Director/Dashboard';
 import DirectorDemands from './pages/Director/Demands';
+import UserManagement from './pages/Director/UserManagement';
 import DepartmentHeadDemands from './pages/DepartmentHead/Demands';
 import TeacherDemands from './pages/Teacher/Demands';
 
@@ -22,6 +23,7 @@ const App = () => {
         {/* Routes pour le directeur */}
         <Route path="/director/dashboard" element={<DirectorDashboard />} />
         <Route path="/director/demands" element={<DirectorDemands />} />
+        <Route path="/user-management" element={<UserManagement />} />
         
         {/* Routes pour les chefs de département */}
         <Route path="/department-head/demands" element={<DepartmentHeadDemands />} />

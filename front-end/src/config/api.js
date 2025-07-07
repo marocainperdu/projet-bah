@@ -1,10 +1,13 @@
 // Configuration pour l'API backend
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000';
+const API_BASE_URL = process.env.REACT_APP_API_URL || '';
 
 // Configuration axios par défaut
 import axios from 'axios';
 
-axios.defaults.baseURL = API_BASE_URL;
+// En développement, on utilise le proxy Vite, donc pas de baseURL
+if (API_BASE_URL) {
+  axios.defaults.baseURL = API_BASE_URL;
+}
 
 // Intercepteur pour ajouter automatiquement le token d'authentification
 axios.interceptors.request.use(

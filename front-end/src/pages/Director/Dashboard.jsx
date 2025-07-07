@@ -27,9 +27,11 @@ import {
   Add as AddIcon,
   Edit as EditIcon,
   Close as CloseIcon,
-  Visibility as ViewIcon
+  Visibility as ViewIcon,
+  People as PeopleIcon
 } from '@mui/icons-material';
 import axios from 'axios';
+import { useNavigate } from 'react-router-dom';
 
 const DirectorDashboard = () => {
   const [demandLists, setDemandLists] = useState([]);
@@ -41,6 +43,7 @@ const DirectorDashboard = () => {
   const [formData, setFormData] = useState({});
   const [selectedList, setSelectedList] = useState(null);
   const [alert, setAlert] = useState({ show: false, message: '', type: 'info' });
+  const navigate = useNavigate();
 
   const token = localStorage.getItem('token');
   const axiosConfig = {
@@ -280,6 +283,15 @@ const DirectorDashboard = () => {
               onClick={() => openCreateDialog('department')}
             >
               Nouveau département
+            </Button>
+          </Grid>
+          <Grid item>
+            <Button
+              variant="outlined"
+              startIcon={<PeopleIcon />}
+              onClick={() => navigate('/user-management')}
+            >
+              Gestion des utilisateurs
             </Button>
           </Grid>
         </Grid>

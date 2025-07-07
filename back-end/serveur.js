@@ -26,11 +26,11 @@ app.use((req, res, next) => {
 
 // Connexion à MySQL
 const db = mysql.createConnection({
-    host: process.env.DB_HOST || 'localhost',
-    user: process.env.DB_USER || 'root',
-    password: process.env.DB_PASSWORD || '',
-    database: process.env.DB_NAME || 'mbacke-demandes',
-    port: process.env.DB_PORT || 3306
+    host: '192.168.1.200',
+    user: 'momo',
+    password: '7RZduvvO1a1rNA',
+    database: 'projet-bah',
+    port: '3306'
 });
 
 // Test de connexion
@@ -61,41 +61,10 @@ const authenticateToken = (req, res, next) => {
 };
 
 // Routes d'authentification
-app.post("/api/register", async (req, res) => {
-    const { email, password, name, role, department_id } = req.body;
-
-    try {
-        // Vérifier si l'utilisateur existe déjà
-        const checkUserQuery = "SELECT * FROM users WHERE email = ?";
-        db.query(checkUserQuery, [email], async (err, results) => {
-            if (err) {
-                return res.status(500).json({ error: "Erreur serveur" });
-            }
-
-            if (results.length > 0) {
-                return res.status(400).json({ error: "Un utilisateur avec cet email existe déjà" });
-            }
-
-            // Hacher le mot de passe
-            const hashedPassword = await bcrypt.hash(password, 10);
-
-            // Insérer le nouvel utilisateur
-            const insertQuery = "INSERT INTO users (email, password, name, role, department_id) VALUES (?, ?, ?, ?, ?)";
-            db.query(insertQuery, [email, hashedPassword, name, role, department_id], (err, results) => {
-                if (err) {
-                    return res.status(500).json({ error: "Erreur lors de l'inscription" });
-                }
-
-                res.status(201).json({
-                    message: "Utilisateur créé avec succès",
-                    userId: results.insertId
-                });
-            });
-        });
-    } catch (error) {
-        res.status(500).json({ error: "Erreur serveur" });
-    }
-});
+// Route d'inscription désactivée - seul le directeur peut créer des utilisateurs
+// app.post("/api/register", async (req, res) => {
+//     res.status(403).json({ error: "L'inscription publique est désactivée. Contactez l'administrateur." });
+// });
 
 app.post("/api/login", (req, res) => {
     const { email, password } = req.body;
@@ -433,3 +402,166 @@ app.listen(PORT, () => {
 });
 
 module.exports = app;
+
+// Routes pour la gestion des utilisateurs (directeur seulement)
+app.get("/api/users", authenticateToken, (req, res) => {
+    if (req.user.role !== 'director') {
+        return res.status(403).json({ error: "Accès non autorisé" });
+    }
+
+    const query = `
+        SELECT u.id, u.email, u.name, u.role, u.department_id, d.name as department_name
+        FROM users u 
+        LEFT JOIN departments d ON u.department_id = d.id 
+        ORDER BY u.name
+    `;
+    
+    db.query(query, (err, results) => {
+        if (err) {
+            return res.status(500).json({ error: "Erreur serveur" });
+        }
+        res.json(results);
+    });
+});
+
+app.post("/api/users", authenticateToken, async (req, res) => {
+    if (req.user.role !== 'director') {
+        return res.status(403).json({ error: "Accès non autorisé" });
+    }
+
+    const { email, password, name, role, department_id } = req.body;
+
+    if (!email || !password || !name || !role) {
+        return res.status(400).json({ error: "Tous les champs requis doivent être remplis" });
+    }
+
+    try {
+        // Vérifier si l'utilisateur existe déjà
+        const checkQuery = "SELECT * FROM users WHERE email = ?";
+        db.query(checkQuery, [email], async (err, results) => {
+            if (err) {
+                return res.status(500).json({ error: "Erreur serveur" });
+            }
+
+            if (results.length > 0) {
+                return res.status(400).json({ error: "Un utilisateur avec cet email existe déjà" });
+            }
+
+            // Hacher le mot de passe
+            const hashedPassword = await bcrypt.hash(password, 10);
+
+            // Insérer le nouvel utilisateur
+            const insertQuery = "INSERT INTO users (email, password, name, role, department_id) VALUES (?, ?, ?, ?, ?)";
+            db.query(insertQuery, [email, hashedPassword, name, role, department_id || null], (err, results) => {
+                if (err) {
+                    return res.status(500).json({ error: "Erreur lors de la création de l'utilisateur" });
+                }
+                res.status(201).json({
+                    message: "Utilisateur créé avec succès",
+                    userId: results.insertId
+                });
+            });
+        });
+    } catch (error) {
+        res.status(500).json({ error: "Erreur serveur" });
+    }
+});
+
+app.put("/api/users/:id", authenticateToken, async (req, res) => {
+    if (req.user.role !== 'director') {
+        return res.status(403).json({ error: "Accès non autorisé" });
+    }
+
+    const userId = req.params.id;
+    const { email, password, name, role, department_id } = req.body;
+
+    if (!email || !name || !role) {
+        return res.status(400).json({ error: "Tous les champs requis doivent être remplis" });
+    }
+
+    try {
+        let updateQuery = "UPDATE users SET email = ?, name = ?, role = ?, department_id = ?";
+        let queryParams = [email, name, role, department_id || null];
+
+        if (password && password.trim() !== '') {
+            const hashedPassword = await bcrypt.hash(password, 10);
+            updateQuery += ", password = ?";
+            queryParams.push(hashedPassword);
+        }
+
+        updateQuery += " WHERE id = ?";
+        queryParams.push(userId);
+
+        db.query(updateQuery, queryParams, (err, results) => {
+            if (err) {
+                return res.status(500).json({ error: "Erreur lors de la modification de l'utilisateur" });
+            }
+            res.json({ message: "Utilisateur modifié avec succès" });
+        });
+    } catch (error) {
+        res.status(500).json({ error: "Erreur serveur" });
+    }
+});
+
+app.delete("/api/users/:id", authenticateToken, (req, res) => {
+    if (req.user.role !== 'director') {
+        return res.status(403).json({ error: "Accès non autorisé" });
+    }
+
+    const userId = req.params.id;
+
+    // Empêcher la suppression de son propre compte
+    if (parseInt(userId) === req.user.userId) {
+        return res.status(400).json({ error: "Vous ne pouvez pas supprimer votre propre compte" });
+    }
+
+    const deleteQuery = "DELETE FROM users WHERE id = ?";
+    db.query(deleteQuery, [userId], (err, results) => {
+        if (err) {
+            return res.status(500).json({ error: "Erreur lors de la suppression de l'utilisateur" });
+        }
+        res.json({ message: "Utilisateur supprimé avec succès" });
+    });
+});
+
+// Routes de test sans base de données
+app.get("/api/test-departments", (req, res) => {
+    res.json([
+        { id: 1, name: "Informatique", description: "Département d'informatique" },
+        { id: 2, name: "Mathématiques", description: "Département de mathématiques" },
+        { id: 3, name: "Physique", description: "Département de physique" }
+    ]);
+});
+
+app.post("/api/test-login", (req, res) => {
+    const { email, password } = req.body;
+    
+    // Utilisateur de test
+    if (email === "test@test.com" && password === "passer") {
+        const token = jwt.sign(
+            { 
+                userId: 1, 
+                email: email, 
+                role: "director",
+                department_id: 1 
+            },
+            process.env.JWT_SECRET || 'secret_key',
+            { expiresIn: '24h' }
+        );
+
+        res.json({
+            message: "Connexion réussie",
+            token,
+            user: {
+                id: 1,
+                email: email,
+                name: "Utilisateur Test",
+                role: "director",
+                department_id: 1,
+                department_name: "Informatique"
+            }
+        });
+    } else {
+        res.status(401).json({ error: "Email ou mot de passe incorrect" });
+    }
+});

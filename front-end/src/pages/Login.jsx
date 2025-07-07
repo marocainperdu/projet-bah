@@ -105,16 +105,6 @@ function Login() {
                         >
                             {loading ? <CircularProgress size={24} color="inherit" /> : "Se connecter"}
                         </Button>
-                        <Button
-                            variant="outlined"
-                            color="secondary"
-                            fullWidth
-                            sx={{ mt: 1 }}
-                            onClick={() => navigate("/register")}
-                            disabled={loading}
-                        >
-                            S'inscrire
-                        </Button>
                     </Box>
                 </Card>
             </Grid>
