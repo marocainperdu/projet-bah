@@ -17,12 +17,20 @@ CREATE TABLE `departments` (
 -- Table des catégories de besoins
 CREATE TABLE `categories` (
   `id` int NOT NULL AUTO_INCREMENT,
+  `code` varchar(20) NOT NULL, -- code comptable (ex: 60411, 6047, etc.)
   `name` varchar(255) NOT NULL,
   `description` text,
+  `parent_id` int NULL, -- pour la hiérarchie des catégories
+  `level` int NOT NULL DEFAULT 1, -- niveau dans la hiérarchie (1=classe, 2=compte, 3=sous-compte, etc.)
+  `type` enum('ordinaire','extraordinaire') NOT NULL DEFAULT 'ordinaire',
+  `section` enum('fonctionnement','investissement') NOT NULL DEFAULT 'fonctionnement',
   `created_by` int NOT NULL, -- référence vers un directeur
+  `is_active` boolean DEFAULT true,
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`)
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `code` (`code`),
+  KEY `parent_id` (`parent_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- Table des utilisateurs (mise à jour des rôles)
@@ -91,7 +99,8 @@ CREATE TABLE `demand_evaluations` (
 
 -- Contraintes de clés étrangères
 ALTER TABLE `categories`
-  ADD CONSTRAINT `categories_ibfk_1` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE CASCADE;
+  ADD CONSTRAINT `categories_ibfk_1` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `categories_ibfk_2` FOREIGN KEY (`parent_id`) REFERENCES `categories` (`id`) ON DELETE CASCADE;
 
 ALTER TABLE `users`
   ADD CONSTRAINT `users_ibfk_1` FOREIGN KEY (`department_id`) REFERENCES `departments` (`id`) ON DELETE SET NULL;
@@ -116,15 +125,81 @@ INSERT INTO `departments` (`name`, `description`) VALUES
 ('Chimie', 'Département de chimie');
 
 INSERT INTO `users` (`email`, `password`, `name`, `role`, `department_id`) VALUES
-('directeur@ecole.com', '$2b$10$hash', 'Directeur Principal', 'director', NULL),
-('chef.info@ecole.com', '$2b$10$hash', 'Chef Info', 'department_head', 1),
-('chef.math@ecole.com', '$2b$10$hash', 'Chef Math', 'department_head', 2),
-('prof.info@ecole.com', '$2b$10$hash', 'Prof Info', 'teacher', 1),
-('prof.math@ecole.com', '$2b$10$hash', 'Prof Math', 'teacher', 2);
+('directeur@ecole.com', '$2b$10$KrFpdqXCjMaToY5jZEddTe0GESZ4ghQ3KFmJDQY5PmVRvquhts7SO', 'Directeur Principal', 'director', NULL),
+('chef.info@ecole.com', '$2b$10$KrFpdqXCjMaToY5jZEddTe0GESZ4ghQ3KFmJDQY5PmVRvquhts7SO', 'Chef Info', 'department_head', 1),
+('chef.math@ecole.com', '$2b$10$KrFpdqXCjMaToY5jZEddTe0GESZ4ghQ3KFmJDQY5PmVRvquhts7SO', 'Chef Math', 'department_head', 2),
+('prof.info@ecole.com', '$2b$10$KrFpdqXCjMaToY5jZEddTe0GESZ4ghQ3KFmJDQY5PmVRvquhts7SO', 'Prof Info', 'teacher', 1),
+('prof.math@ecole.com', '$2b$10$KrFpdqXCjMaToY5jZEddTe0GESZ4ghQ3KFmJDQY5PmVRvquhts7SO', 'Prof Math', 'teacher', 2);
 
-INSERT INTO `categories` (`name`, `description`, `created_by`) VALUES
-('Matériel informatique', 'Ordinateurs, serveurs, équipements réseau', 1),
-('Logiciels', 'Licences logicielles, abonnements', 1),
-('Mobilier', 'Bureaux, chaises, armoires', 1),
-('Fournitures', 'Papeterie, consommables', 1),
-('Équipement pédagogique', 'Tableaux, projecteurs, matériel de cours', 1);
+INSERT INTO `categories` (`code`, `name`, `description`, `parent_id`, `level`, `type`, `section`, `created_by`) VALUES
+-- DÉPENSES ORDINAIRES - Section Fonctionnement
+-- Classe 60 - Achats et variations de stocks
+('60', 'Achats et variations de stocks', 'Comptes des achats', NULL, 1, 'ordinaire', 'fonctionnement', 1),
+('604', 'Achats stockés de matières et fournitures consommables', 'Matières et fournitures stockées', 1, 2, 'ordinaire', 'fonctionnement', 1),
+('6041', 'Matières consommables', 'Matières consommables diverses', 2, 3, 'ordinaire', 'fonctionnement', 1),
+('60411', 'Consommables informatiques', 'Cartouches, CD, clés USB, etc.', 3, 4, 'ordinaire', 'fonctionnement', 1),
+('6043', 'Produits d\'entretien', 'Produits de nettoyage et entretien', 2, 3, 'ordinaire', 'fonctionnement', 1),
+('6047', 'Fournitures de bureau', 'Papeterie, stylos, etc.', 2, 3, 'ordinaire', 'fonctionnement', 1),
+('6048', 'Autres achats stockés matières', 'Autres matières stockées', 2, 3, 'ordinaire', 'fonctionnement', 1),
+('60481', 'Achats imprimés et cartes', 'Documents imprimés, cartes diverses', 7, 4, 'ordinaire', 'fonctionnement', 1),
+('605', 'Autres achats', 'Achats non stockés', 1, 2, 'ordinaire', 'fonctionnement', 1),
+('6051', 'Fournitures non stockables – Eau', 'Consommation d\'eau', 9, 3, 'ordinaire', 'fonctionnement', 1),
+('6052', 'Fournitures non stockables – Électricité', 'Consommation électrique', 9, 3, 'ordinaire', 'fonctionnement', 1),
+('6053', 'Fournitures non stockables – Autres énergies', 'Gaz, carburants, etc.', 9, 3, 'ordinaire', 'fonctionnement', 1),
+('6056', 'Achat de petits matériels et outillages', 'Petit matériel non immobilisable', 9, 3, 'ordinaire', 'fonctionnement', 1),
+('6057', 'Achat d\'études et de prestations de services', 'Services externes', 9, 3, 'ordinaire', 'fonctionnement', 1),
+('6058', 'Achats de travaux, matériels et équipements', 'Travaux et équipements', 9, 3, 'ordinaire', 'fonctionnement', 1),
+
+-- Classe 61 - Transports
+('61', 'Transports', 'Frais de transport', NULL, 1, 'ordinaire', 'fonctionnement', 1),
+('614', 'Transports du Personnel', 'Transport des employés', 16, 2, 'ordinaire', 'fonctionnement', 1),
+('616', 'Transport de plis', 'Courrier et colis', 16, 2, 'ordinaire', 'fonctionnement', 1),
+('618', 'Autres frais de transport', 'Voyages et déplacements', 16, 2, 'ordinaire', 'fonctionnement', 1),
+('6181', 'Voyages et déplacements', 'Missions et voyages', 19, 3, 'ordinaire', 'fonctionnement', 1),
+
+-- Classe 62 - Services extérieurs A
+('62', 'Services extérieurs A', 'Services externes type A', NULL, 1, 'ordinaire', 'fonctionnement', 1),
+('622', 'Location et Charges Locatives', 'Loyers et charges', 21, 2, 'ordinaire', 'fonctionnement', 1),
+('624', 'Entretien, Réparations et Maintenance', 'Maintenance et réparations', 21, 2, 'ordinaire', 'fonctionnement', 1),
+('6241', 'Entretien, réparations et maintenance de biens immobiliers', 'Entretien bâtiments', 23, 3, 'ordinaire', 'fonctionnement', 1),
+('6242', 'Entretien et réparation de biens mobiliers', 'Entretien mobilier', 23, 3, 'ordinaire', 'fonctionnement', 1),
+('6243', 'Maintenance', 'Contrats de maintenance', 23, 3, 'ordinaire', 'fonctionnement', 1),
+('625', 'Primes d\'assurances', 'Assurances diverses', 21, 2, 'ordinaire', 'fonctionnement', 1),
+('626', 'Études, recherche et Documentation', 'Documentation et recherche', 21, 2, 'ordinaire', 'fonctionnement', 1),
+('6261', 'Études et recherche', 'Frais d\'études', 28, 3, 'ordinaire', 'fonctionnement', 1),
+('6265', 'Documentation générale', 'Livres et documentation', 28, 3, 'ordinaire', 'fonctionnement', 1),
+('627', 'Publicité, publication et relations publiques', 'Communication', 21, 2, 'ordinaire', 'fonctionnement', 1),
+('628', 'Frais de télécommunications', 'Téléphone, internet', 21, 2, 'ordinaire', 'fonctionnement', 1),
+('6281', 'Frais de téléphone', 'Communications téléphoniques', 31, 3, 'ordinaire', 'fonctionnement', 1),
+('6284', 'Internet ADSL', 'Connexions internet', 31, 3, 'ordinaire', 'fonctionnement', 1),
+
+-- Classe 63 - Services extérieurs B
+('63', 'Services extérieurs B', 'Services externes type B', NULL, 1, 'ordinaire', 'fonctionnement', 1),
+('631', 'Frais bancaires', 'Frais de banque', 34, 2, 'ordinaire', 'fonctionnement', 1),
+('632', 'Rémunération d\'intermédiaires et de Conseils', 'Honoraires et conseils', 34, 2, 'ordinaire', 'fonctionnement', 1),
+('633', 'Frais de formation du Personnel', 'Formation continue', 34, 2, 'ordinaire', 'fonctionnement', 1),
+('634', 'Redevances pour brevet, licence, logiciel et droits similaires', 'Licences logicielles', 34, 2, 'ordinaire', 'fonctionnement', 1),
+
+-- DÉPENSES EXTRAORDINAIRES - Section Investissement
+-- Classe 21 - Immobilisations incorporelles
+('21', 'Immobilisations incorporelles', 'Actifs incorporels', NULL, 1, 'extraordinaire', 'investissement', 1),
+('211', 'Frais de recherche et de développement', 'R&D', 39, 2, 'extraordinaire', 'investissement', 1),
+('212', 'Brevets, licences, concessions et droits similaires', 'Propriété intellectuelle', 39, 2, 'extraordinaire', 'investissement', 1),
+('213', 'Logiciels', 'Licences logicielles capitalisées', 39, 2, 'extraordinaire', 'investissement', 1),
+
+-- Classe 23 - Bâtiments, installations techniques
+('23', 'Bâtiments, installations techniques et agencements', 'Infrastructure', NULL, 1, 'extraordinaire', 'investissement', 1),
+('231', 'Bâtiments ind., agri., adm. et com. sur sols propres', 'Constructions', 43, 2, 'extraordinaire', 'investissement', 1),
+('235', 'Aménagements de Bureaux', 'Aménagements', 43, 2, 'extraordinaire', 'investissement', 1),
+
+-- Classe 24 - Matériel
+('24', 'Matériel', 'Équipements et matériels', NULL, 1, 'extraordinaire', 'investissement', 1),
+('241', 'Matériel et outillage industriel', 'Équipements industriels', 46, 2, 'extraordinaire', 'investissement', 1),
+('244', 'Matériel et Mobilier', 'Mobilier et équipements', 46, 2, 'extraordinaire', 'investissement', 1),
+('2441', 'Matériel de bureau', 'Équipements de bureau', 48, 3, 'extraordinaire', 'investissement', 1),
+('2442', 'Matériel informatique', 'Ordinateurs, serveurs, réseaux', 48, 3, 'extraordinaire', 'investissement', 1),
+('2443', 'Matériel bureautique', 'Imprimantes, scanners, etc.', 48, 3, 'extraordinaire', 'investissement', 1),
+('2444', 'Mobilier de bureau', 'Bureaux, chaises, armoires', 48, 3, 'extraordinaire', 'investissement', 1),
+('245', 'Matériel de Transport', 'Véhicules', 46, 2, 'extraordinaire', 'investissement', 1),
+('248', 'Autres Matériels', 'Équipements divers', 46, 2, 'extraordinaire', 'investissement', 1),
+('2482', 'Matériels de cours et de TP', 'Équipements pédagogiques', 53, 3, 'extraordinaire', 'investissement', 1);

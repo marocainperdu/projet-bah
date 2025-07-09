@@ -28,8 +28,8 @@ import {
   Edit as EditIcon,
   Close as CloseIcon,
   Visibility as ViewIcon,
-  Assessment as AssessmentIcon,
   People as PeopleIcon,
+  Category as CategoryIcon,
   Delete as DeleteIcon
 } from '@mui/icons-material';
 import axios from 'axios';
@@ -41,9 +41,10 @@ const DirectorDashboard = () => {
   const [departments, setDepartments] = useState([]);
   const [stats, setStats] = useState({});
   const [openDialog, setOpenDialog] = useState(false);
-  const [dialogType, setDialogType] = useState(''); // 'list', 'category', 'department'
+  const [dialogType, setDialogType] = useState(''); // 'list', 'department'
   const [formData, setFormData] = useState({});
   const [selectedList, setSelectedList] = useState(null);
+  const [editingDepartment, setEditingDepartment] = useState(null);
   const [alert, setAlert] = useState({ show: false, message: '', type: 'info' });
   const navigate = useNavigate();
 
@@ -93,68 +94,69 @@ const DirectorDashboard = () => {
   };
 
   const handleCreateCategory = async () => {
-    try {
-      await axios.post('/api/categories', formData, axiosConfig);
-      showAlert('Catégorie créée avec succès', 'success');
-      setOpenDialog(false);
-      setFormData({});
-      fetchData();
-    } catch (error) {
-      showAlert('Erreur lors de la création de la catégorie', 'error');
-    }
+    // Redirection vers la page de gestion des catégories
+    navigate('/category-management');
   };
 
   const handleCreateDepartment = async () => {
     try {
-      await axios.post('/api/departments', formData, axiosConfig);
-      showAlert('Département créé avec succès', 'success');
+      if (editingDepartment) {
+        await axios.put(`/api/departments/${editingDepartment.id}`, formData, axiosConfig);
+        showAlert('Département modifié avec succès', 'success');
+      } else {
+        await axios.post('/api/departments', formData, axiosConfig);
+        showAlert('Département créé avec succès', 'success');
+      }
       setOpenDialog(false);
+      setEditingDepartment(null);
       setFormData({});
       fetchData();
     } catch (error) {
-      showAlert('Erreur lors de la création du département', 'error');
+      showAlert('Erreur lors de la sauvegarde du département', 'error');
+    }
+  };
+
+  const handleDeleteDepartment = async (departmentId) => {
+    if (window.confirm('Êtes-vous sûr de vouloir supprimer ce département ?')) {
+      try {
+        await axios.delete(`/api/departments/${departmentId}`, axiosConfig);
+        showAlert('Département supprimé avec succès', 'success');
+        fetchData();
+      } catch (error) {
+        showAlert('Erreur lors de la suppression du département', 'error');
+      }
     }
   };
 
   const handleToggleListStatus = async (listId, currentStatus) => {
     try {
-      // Une fois fermée, une liste ne peut plus être rouverte
-      if (currentStatus === 'completed') {
-        showAlert('Cette liste est définitivement fermée et ne peut plus être rouverte', 'warning');
-        return;
-      }
-      
       const newStatus = currentStatus === 'open' ? 'closed' : 'open';
       await axios.put(`/api/demand-lists/${listId}/status`, { status: newStatus }, axiosConfig);
-      showAlert(`Liste ${newStatus === 'open' ? 'ouverte' : 'fermée définitivement'} avec succès`, 'success');
+      showAlert(`Liste ${newStatus === 'open' ? 'ouverte' : 'fermée'} avec succès`, 'success');
       fetchData();
     } catch (error) {
       showAlert('Erreur lors de la mise à jour du statut', 'error');
     }
   };
 
-  const handleViewListDemands = (listId, listTitle) => {
-    // Rediriger vers une page de consultation des demandes de cette liste
-    // ou ouvrir un modal avec les demandes
-    navigate(`/demands-review/${listId}`, { state: { listTitle } });
-  };
-
-  const handleDeleteList = async (listId, listTitle) => {
-    if (window.confirm(`Êtes-vous sûr de vouloir supprimer définitivement la liste "${listTitle}" et toutes ses demandes associées ? Cette action est irréversible.`)) {
-      try {
-        await axios.delete(`/api/demand-lists/${listId}`, axiosConfig);
-        showAlert('Liste supprimée avec succès', 'success');
-        fetchData();
-      } catch (error) {
-        const errorMessage = error.response?.data?.error || 'Erreur lors de la suppression de la liste';
-        showAlert(errorMessage, 'error');
-      }
-    }
-  };
-
   const openCreateDialog = (type) => {
+    if (type === 'category') {
+      navigate('/category-management');
+      return;
+    }
     setDialogType(type);
+    setEditingDepartment(null);
     setFormData({});
+    setOpenDialog(true);
+  };
+
+  const openEditDepartmentDialog = (department) => {
+    setDialogType('department');
+    setEditingDepartment(department);
+    setFormData({
+      name: department.name || '',
+      description: department.description || ''
+    });
     setOpenDialog(true);
   };
 
@@ -168,32 +170,20 @@ const DirectorDashboard = () => {
   const getStatusColor = (status) => {
     switch (status) {
       case 'open': return 'success';
-      case 'completed': return 'default';
       case 'closed': return 'default';
       default: return 'default';
-    }
-  };
-
-  const getStatusLabel = (status) => {
-    switch (status) {
-      case 'open': return 'Ouverte';
-      case 'completed': return 'Fermée définitivement';
-      case 'closed': return 'Fermée';
-      default: return status;
     }
   };
 
   const renderCreateDialog = () => {
     const titles = {
       'list': 'Créer une nouvelle liste de demandes',
-      'category': 'Créer une nouvelle catégorie',
-      'department': 'Créer un nouveau département'
+      'department': editingDepartment ? 'Modifier le département' : 'Créer un nouveau département'
     };
 
     const handleSubmit = () => {
       switch (dialogType) {
         case 'list': handleCreateList(); break;
-        case 'category': handleCreateCategory(); break;
         case 'department': handleCreateDepartment(); break;
         default: break;
       }
@@ -235,7 +225,9 @@ const DirectorDashboard = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setOpenDialog(false)}>Annuler</Button>
-          <Button onClick={handleSubmit} variant="contained">Créer</Button>
+          <Button onClick={handleSubmit} variant="contained">
+            {editingDepartment && dialogType === 'department' ? 'Modifier' : 'Créer'}
+          </Button>
         </DialogActions>
       </Dialog>
     );
@@ -284,7 +276,7 @@ const DirectorDashboard = () => {
             <CardContent>
               <Typography variant="h6">Coût approuvé</Typography>
               <Typography variant="h4" color="success.main">
-                {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(stats.approved_cost || 0)}
+                {new Intl.NumberFormat('fr-FR').format(stats.approved_cost || 0)} FCFA
               </Typography>
             </CardContent>
           </Card>
@@ -306,20 +298,11 @@ const DirectorDashboard = () => {
           </Grid>
           <Grid item>
             <Button
-              variant="outlined"
-              startIcon={<AddIcon />}
-              onClick={() => openCreateDialog('category')}
+              variant="contained"
+              startIcon={<CategoryIcon />}
+              onClick={() => navigate('/category-management')}
             >
-              Nouvelle catégorie
-            </Button>
-          </Grid>
-          <Grid item>
-            <Button
-              variant="outlined"
-              startIcon={<AddIcon />}
-              onClick={() => openCreateDialog('department')}
-            >
-              Nouveau département
+              Gestion des catégories
             </Button>
           </Grid>
           <Grid item>
@@ -361,41 +344,19 @@ const DirectorDashboard = () => {
                     </TableCell>
                     <TableCell>
                       <Chip
-                        label={getStatusLabel(list.status)}
+                        label={list.status === 'open' ? 'Ouverte' : 'Fermée'}
                         color={getStatusColor(list.status)}
                         size="small"
                       />
                     </TableCell>
                     <TableCell>
-                      {list.status === 'open' ? (
-                        <Tooltip title="Fermer définitivement">
-                          <IconButton
-                            onClick={() => handleToggleListStatus(list.id, list.status)}
-                            color="warning"
-                          >
-                            <CloseIcon />
-                          </IconButton>
-                        </Tooltip>
-                      ) : list.status === 'completed' ? (
-                        <Box sx={{ display: 'flex', gap: 1 }}>
-                          <Tooltip title="Consulter les demandes">
-                            <IconButton
-                              onClick={() => handleViewListDemands(list.id, list.title)}
-                              color="primary"
-                            >
-                              <AssessmentIcon />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title="Supprimer la liste">
-                            <IconButton
-                              onClick={() => handleDeleteList(list.id, list.title)}
-                              color="error"
-                            >
-                              <DeleteIcon />
-                            </IconButton>
-                          </Tooltip>
-                        </Box>
-                      ) : null}
+                      <Tooltip title={list.status === 'open' ? 'Fermer' : 'Ouvrir'}>
+                        <IconButton
+                          onClick={() => handleToggleListStatus(list.id, list.status)}
+                        >
+                          {list.status === 'open' ? <CloseIcon /> : <EditIcon />}
+                        </IconButton>
+                      </Tooltip>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -408,34 +369,105 @@ const DirectorDashboard = () => {
       {/* Catégories et Départements */}
       <Grid container spacing={3}>
         <Grid item xs={12} md={6}>
-          <Card>
+          <Card sx={{ cursor: 'pointer' }} onClick={() => navigate('/category-management')}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
                 Catégories ({categories.length})
               </Typography>
-              {categories.map((category) => (
+              {categories.slice(0, 10).map((category) => (
                 <Chip
                   key={category.id}
-                  label={category.name}
+                  label={`${category.code} - ${category.name}`}
                   sx={{ mr: 1, mb: 1 }}
+                  size="small"
                 />
               ))}
+              {categories.length > 10 && (
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                  +{categories.length - 10} autres catégories...
+                </Typography>
+              )}
+              <Typography variant="body2" color="primary" sx={{ mt: 1, fontWeight: 'bold' }}>
+                Cliquez pour gérer les catégories
+              </Typography>
             </CardContent>
           </Card>
         </Grid>
+        
         <Grid item xs={12} md={6}>
           <Card>
             <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Départements ({departments.length})
-              </Typography>
-              {departments.map((dept) => (
-                <Chip
-                  key={dept.id}
-                  label={dept.name}
-                  sx={{ mr: 1, mb: 1 }}
-                />
-              ))}
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h6">
+                  Départements ({departments.length})
+                </Typography>
+                <Button
+                  variant="contained"
+                  startIcon={<AddIcon />}
+                  onClick={() => openCreateDialog('department')}
+                  size="small"
+                >
+                  Nouveau
+                </Button>
+              </Box>
+              <TableContainer>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Nom</TableCell>
+                      <TableCell>Actions</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {departments.map((department) => (
+                      <TableRow key={department.id}>
+                        <TableCell>
+                          <Box>
+                            <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                              {department.name}
+                            </Typography>
+                            {department.description && (
+                              <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                                {department.description.length > 30 
+                                  ? `${department.description.substring(0, 30)}...` 
+                                  : department.description
+                                }
+                              </Typography>
+                            )}
+                          </Box>
+                        </TableCell>
+                        <TableCell>
+                          <IconButton
+                            onClick={() => openEditDepartmentDialog(department)}
+                            color="primary"
+                            size="small"
+                            title="Modifier"
+                          >
+                            <EditIcon fontSize="small" />
+                          </IconButton>
+                          <IconButton
+                            onClick={() => handleDeleteDepartment(department.id)}
+                            color="error"
+                            size="small"
+                            title="Supprimer"
+                          >
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {departments.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={2} sx={{ textAlign: 'center', py: 2 }}>
+                          <Typography variant="caption" color="text.secondary">
+                            Aucun département
+                          </Typography>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </TableContainer>
             </CardContent>
           </Card>
         </Grid>

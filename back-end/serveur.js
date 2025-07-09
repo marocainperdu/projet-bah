@@ -149,156 +149,15 @@ app.post("/api/login", (req, res) => {
     });
 });
 
-// Routes pour la gestion des utilisateurs (CRUD)
-app.get("/api/users", authenticateToken, (req, res) => {
-    if (req.user.role !== 'director') {
-        return res.status(403).json({ error: "Accès non autorisé" });
-    }
-
-    const query = `
-        SELECT u.id, u.name, u.email, u.role, u.department_id, u.created_at,
-               d.name as department_name
-        FROM users u 
-        LEFT JOIN departments d ON u.department_id = d.id 
-        ORDER BY u.name
-    `;
-    
-    db.query(query, (err, results) => {
-        if (err) {
-            return res.status(500).json({ error: "Erreur serveur" });
-        }
-        res.json(results);
-    });
-});
-
-app.post("/api/users", authenticateToken, async (req, res) => {
-    if (req.user.role !== 'director') {
-        return res.status(403).json({ error: "Accès non autorisé" });
-    }
-
-    const { email, password, name, role, department_id } = req.body;
-
-    if (!email || !password || !name || !role) {
-        return res.status(400).json({ error: "Tous les champs obligatoires doivent être renseignés" });
-    }
-
-    try {
-        // Vérifier si l'utilisateur existe déjà
-        const checkUserQuery = "SELECT * FROM users WHERE email = ?";
-        db.query(checkUserQuery, [email], async (err, results) => {
-            if (err) {
-                return res.status(500).json({ error: "Erreur serveur" });
-            }
-
-            if (results.length > 0) {
-                return res.status(400).json({ error: "Un utilisateur avec cet email existe déjà" });
-            }
-
-            // Hacher le mot de passe
-            const hashedPassword = await bcrypt.hash(password, 10);
-
-            // Insérer le nouvel utilisateur
-            const insertQuery = "INSERT INTO users (email, password, name, role, department_id) VALUES (?, ?, ?, ?, ?)";
-            db.query(insertQuery, [email, hashedPassword, name, role, department_id || null], (err, results) => {
-                if (err) {
-                    return res.status(500).json({ error: "Erreur lors de la création de l'utilisateur" });
-                }
-
-                res.status(201).json({
-                    message: "Utilisateur créé avec succès",
-                    userId: results.insertId
-                });
-            });
-        });
-    } catch (error) {
-        res.status(500).json({ error: "Erreur serveur" });
-    }
-});
-
-app.put("/api/users/:id", authenticateToken, async (req, res) => {
-    if (req.user.role !== 'director') {
-        return res.status(403).json({ error: "Accès non autorisé" });
-    }
-
-    const userId = req.params.id;
-    const { email, password, name, role, department_id } = req.body;
-
-    if (!email || !name || !role) {
-        return res.status(400).json({ error: "Les champs email, nom et rôle sont obligatoires" });
-    }
-
-    try {
-        // Vérifier si l'email est déjà utilisé par un autre utilisateur
-        const checkEmailQuery = "SELECT id FROM users WHERE email = ? AND id != ?";
-        db.query(checkEmailQuery, [email, userId], async (err, results) => {
-            if (err) {
-                return res.status(500).json({ error: "Erreur serveur" });
-            }
-
-            if (results.length > 0) {
-                return res.status(400).json({ error: "Cet email est déjà utilisé par un autre utilisateur" });
-            }
-
-            let updateQuery;
-            let updateParams;
-
-            if (password) {
-                // Mise à jour avec nouveau mot de passe
-                const hashedPassword = await bcrypt.hash(password, 10);
-                updateQuery = "UPDATE users SET email = ?, password = ?, name = ?, role = ?, department_id = ? WHERE id = ?";
-                updateParams = [email, hashedPassword, name, role, department_id || null, userId];
-            } else {
-                // Mise à jour sans changer le mot de passe
-                updateQuery = "UPDATE users SET email = ?, name = ?, role = ?, department_id = ? WHERE id = ?";
-                updateParams = [email, name, role, department_id || null, userId];
-            }
-
-            db.query(updateQuery, updateParams, (err, results) => {
-                if (err) {
-                    return res.status(500).json({ error: "Erreur lors de la mise à jour de l'utilisateur" });
-                }
-
-                if (results.affectedRows === 0) {
-                    return res.status(404).json({ error: "Utilisateur non trouvé" });
-                }
-
-                res.json({ message: "Utilisateur mis à jour avec succès" });
-            });
-        });
-    } catch (error) {
-        res.status(500).json({ error: "Erreur serveur" });
-    }
-});
-
-app.delete("/api/users/:id", authenticateToken, (req, res) => {
-    if (req.user.role !== 'director') {
-        return res.status(403).json({ error: "Accès non autorisé" });
-    }
-
-    const userId = req.params.id;
-
-    // Empêcher la suppression de son propre compte
-    if (parseInt(userId) === req.user.userId) {
-        return res.status(400).json({ error: "Vous ne pouvez pas supprimer votre propre compte" });
-    }
-
-    const deleteQuery = "DELETE FROM users WHERE id = ?";
-    db.query(deleteQuery, [userId], (err, results) => {
-        if (err) {
-            return res.status(500).json({ error: "Erreur lors de la suppression de l'utilisateur" });
-        }
-
-        if (results.affectedRows === 0) {
-            return res.status(404).json({ error: "Utilisateur non trouvé" });
-        }
-
-        res.json({ message: "Utilisateur supprimé avec succès" });
-    });
-});
-
 // Routes pour les départements
 app.get("/api/departments", authenticateToken, (req, res) => {
-    const query = "SELECT * FROM departments ORDER BY name";
+    const query = `
+        SELECT d.*, COUNT(u.id) as user_count 
+        FROM departments d 
+        LEFT JOIN users u ON d.id = u.department_id 
+        GROUP BY d.id 
+        ORDER BY d.name
+    `;
     db.query(query, (err, results) => {
         if (err) {
             return res.status(500).json({ error: "Erreur serveur" });
@@ -323,9 +182,62 @@ app.post("/api/departments", authenticateToken, (req, res) => {
     });
 });
 
+app.put("/api/departments/:id", authenticateToken, (req, res) => {
+    if (req.user.role !== 'director') {
+        return res.status(403).json({ error: "Accès non autorisé" });
+    }
+
+    const { name, description } = req.body;
+    const query = "UPDATE departments SET name = ?, description = ? WHERE id = ?";
+    
+    db.query(query, [name, description, req.params.id], (err, results) => {
+        if (err) {
+            return res.status(500).json({ error: "Erreur lors de la modification du département" });
+        }
+        if (results.affectedRows === 0) {
+            return res.status(404).json({ error: "Département non trouvé" });
+        }
+        res.json({ message: "Département modifié avec succès" });
+    });
+});
+
+app.delete("/api/departments/:id", authenticateToken, (req, res) => {
+    if (req.user.role !== 'director') {
+        return res.status(403).json({ error: "Accès non autorisé" });
+    }
+
+    // Vérifier s'il y a des utilisateurs associés
+    const checkUsersQuery = "SELECT COUNT(*) as user_count FROM users WHERE department_id = ?";
+    db.query(checkUsersQuery, [req.params.id], (err, results) => {
+        if (err) {
+            return res.status(500).json({ error: "Erreur serveur" });
+        }
+        
+        if (results[0].user_count > 0) {
+            return res.status(400).json({ error: "Impossible de supprimer un département qui contient des utilisateurs" });
+        }
+
+        const deleteQuery = "DELETE FROM departments WHERE id = ?";
+        db.query(deleteQuery, [req.params.id], (err, results) => {
+            if (err) {
+                return res.status(500).json({ error: "Erreur lors de la suppression du département" });
+            }
+            if (results.affectedRows === 0) {
+                return res.status(404).json({ error: "Département non trouvé" });
+            }
+            res.json({ message: "Département supprimé avec succès" });
+        });
+    });
+});
+
 // Routes pour les catégories
 app.get("/api/categories", authenticateToken, (req, res) => {
-    const query = "SELECT * FROM categories ORDER BY name";
+    const query = `
+        SELECT c.*, cp.name as parent_name 
+        FROM categories c 
+        LEFT JOIN categories cp ON c.parent_id = cp.id 
+        ORDER BY c.level, c.code, c.name
+    `;
     db.query(query, (err, results) => {
         if (err) {
             return res.status(500).json({ error: "Erreur serveur" });
@@ -339,14 +251,109 @@ app.post("/api/categories", authenticateToken, (req, res) => {
         return res.status(403).json({ error: "Accès non autorisé" });
     }
 
-    const { name, description } = req.body;
-    const query = "INSERT INTO categories (name, description, created_by) VALUES (?, ?, ?)";
+    const { code, name, description, parent_id, level, type, section, is_active } = req.body;
     
-    db.query(query, [name, description, req.user.userId], (err, results) => {
+    // Vérifier l'unicité du code
+    const checkCodeQuery = "SELECT id FROM categories WHERE code = ?";
+    db.query(checkCodeQuery, [code], (err, results) => {
         if (err) {
-            return res.status(500).json({ error: "Erreur lors de la création de la catégorie" });
+            return res.status(500).json({ error: "Erreur serveur" });
         }
-        res.status(201).json({ message: "Catégorie créée avec succès", id: results.insertId });
+        
+        if (results.length > 0) {
+            return res.status(400).json({ error: "Ce code comptable existe déjà" });
+        }
+
+        const query = `
+            INSERT INTO categories (code, name, description, parent_id, level, type, section, created_by, is_active) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `;
+        
+        db.query(query, [code, name, description, parent_id, level || 1, type || 'ordinaire', 
+                        section || 'fonctionnement', req.user.userId, is_active !== false], (err, results) => {
+            if (err) {
+                return res.status(500).json({ error: "Erreur lors de la création de la catégorie" });
+            }
+            res.status(201).json({ message: "Catégorie créée avec succès", id: results.insertId });
+        });
+    });
+});
+
+app.put("/api/categories/:id", authenticateToken, (req, res) => {
+    if (req.user.role !== 'director') {
+        return res.status(403).json({ error: "Accès non autorisé" });
+    }
+
+    const { code, name, description, parent_id, level, type, section, is_active } = req.body;
+    
+    // Vérifier l'unicité du code (sauf pour la catégorie en cours de modification)
+    const checkCodeQuery = "SELECT id FROM categories WHERE code = ? AND id != ?";
+    db.query(checkCodeQuery, [code, req.params.id], (err, results) => {
+        if (err) {
+            return res.status(500).json({ error: "Erreur serveur" });
+        }
+        
+        if (results.length > 0) {
+            return res.status(400).json({ error: "Ce code comptable existe déjà" });
+        }
+
+        const query = `
+            UPDATE categories 
+            SET code = ?, name = ?, description = ?, parent_id = ?, level = ?, type = ?, section = ?, is_active = ?
+            WHERE id = ?
+        `;
+        
+        db.query(query, [code, name, description, parent_id, level, type, section, 
+                        is_active !== false, req.params.id], (err, results) => {
+            if (err) {
+                return res.status(500).json({ error: "Erreur lors de la modification de la catégorie" });
+            }
+            if (results.affectedRows === 0) {
+                return res.status(404).json({ error: "Catégorie non trouvée" });
+            }
+            res.json({ message: "Catégorie modifiée avec succès" });
+        });
+    });
+});
+
+app.delete("/api/categories/:id", authenticateToken, (req, res) => {
+    if (req.user.role !== 'director') {
+        return res.status(403).json({ error: "Accès non autorisé" });
+    }
+
+    // Vérifier s'il y a des sous-catégories
+    const checkChildrenQuery = "SELECT COUNT(*) as child_count FROM categories WHERE parent_id = ?";
+    db.query(checkChildrenQuery, [req.params.id], (err, results) => {
+        if (err) {
+            return res.status(500).json({ error: "Erreur serveur" });
+        }
+        
+        if (results[0].child_count > 0) {
+            return res.status(400).json({ error: "Impossible de supprimer une catégorie qui contient des sous-catégories" });
+        }
+
+        // Vérifier s'il y a des demandes associées
+        const checkDemandsQuery = "SELECT COUNT(*) as demand_count FROM demands WHERE category_id = ?";
+        db.query(checkDemandsQuery, [req.params.id], (err, results) => {
+            if (err) {
+                return res.status(500).json({ error: "Erreur serveur" });
+            }
+            
+            if (results[0].demand_count > 0) {
+                return res.status(400).json({ error: "Impossible de supprimer une catégorie utilisée dans des demandes" });
+            }
+
+            const deleteQuery = "DELETE FROM categories WHERE id = ?";
+            db.query(deleteQuery, [req.params.id], (err, results) => {
+                if (err) {
+                    return res.status(500).json({ error: "Erreur lors de la suppression de la catégorie" });
+                }
+                if (results.affectedRows === 0) {
+                    return res.status(404).json({ error: "Catégorie non trouvée" });
+                }
+                res.json({ message: "Catégorie supprimée avec succès" });
+            });
+        });
     });
 });
 
@@ -389,125 +396,13 @@ app.put("/api/demand-lists/:id/status", authenticateToken, (req, res) => {
     }
 
     const { status } = req.body;
-    
-    // Vérifier que le statut est valide
-    if (!['open', 'closed', 'completed'].includes(status)) {
-        return res.status(400).json({ error: "Statut invalide" });
-    }
-    
-    // Si on ferme une liste (passage de 'open' à 'closed'), on la marque comme 'completed' (définitivement fermée)
-    let finalStatus = status;
-    if (status === 'closed') {
-        finalStatus = 'completed';
-    }
-    
     const query = "UPDATE demand_lists SET status = ? WHERE id = ?";
     
-    db.query(query, [finalStatus, req.params.id], (err, results) => {
+    db.query(query, [status, req.params.id], (err, results) => {
         if (err) {
             return res.status(500).json({ error: "Erreur lors de la mise à jour" });
         }
         res.json({ message: "Statut mis à jour avec succès" });
-    });
-});
-
-// Route pour supprimer une liste de demandes fermée
-app.delete("/api/demand-lists/:id", authenticateToken, (req, res) => {
-    if (req.user.role !== 'director') {
-        return res.status(403).json({ error: "Accès non autorisé" });
-    }
-
-    const listId = req.params.id;
-
-    // Vérifier que la liste existe et qu'elle est fermée (completed)
-    const checkStatusQuery = "SELECT status FROM demand_lists WHERE id = ?";
-    db.query(checkStatusQuery, [listId], (err, results) => {
-        if (err) {
-            return res.status(500).json({ error: "Erreur serveur" });
-        }
-
-        if (results.length === 0) {
-            return res.status(404).json({ error: "Liste de demandes non trouvée" });
-        }
-
-        if (results[0].status !== 'completed') {
-            return res.status(400).json({ error: "Seules les listes fermées définitivement peuvent être supprimées" });
-        }
-
-        // Supprimer en cascade : d'abord les évaluations, puis les demandes, puis la liste
-        db.beginTransaction((err) => {
-            if (err) {
-                return res.status(500).json({ error: "Erreur de transaction" });
-            }
-
-            // 1. Supprimer les évaluations des demandes de cette liste
-            const deleteEvaluationsQuery = `
-                DELETE de FROM demand_evaluations de
-                JOIN demands d ON de.demand_id = d.id
-                WHERE d.demand_list_id = ?
-            `;
-            
-            db.query(deleteEvaluationsQuery, [listId], (err, results) => {
-                if (err) {
-                    return db.rollback(() => {
-                        res.status(500).json({ error: "Erreur lors de la suppression des évaluations" });
-                    });
-                }
-
-                // 2. Supprimer les demandes de cette liste
-                const deleteDemandsQuery = "DELETE FROM demands WHERE demand_list_id = ?";
-                db.query(deleteDemandsQuery, [listId], (err, results) => {
-                    if (err) {
-                        return db.rollback(() => {
-                            res.status(500).json({ error: "Erreur lors de la suppression des demandes" });
-                        });
-                    }
-
-                    // 3. Supprimer la liste elle-même
-                    const deleteListQuery = "DELETE FROM demand_lists WHERE id = ?";
-                    db.query(deleteListQuery, [listId], (err, results) => {
-                        if (err) {
-                            return db.rollback(() => {
-                                res.status(500).json({ error: "Erreur lors de la suppression de la liste" });
-                            });
-                        }
-
-                        db.commit((err) => {
-                            if (err) {
-                                return db.rollback(() => {
-                                    res.status(500).json({ error: "Erreur de validation" });
-                                });
-                            }
-                            res.json({ message: "Liste de demandes supprimée avec succès" });
-                        });
-                    });
-                });
-            });
-        });
-    });
-});
-
-// Route pour obtenir les demandes d'une liste spécifique
-app.get("/api/demand-lists/:id/demands", authenticateToken, (req, res) => {
-    if (req.user.role !== 'director') {
-        return res.status(403).json({ error: "Accès non autorisé" });
-    }
-
-    const query = `
-        SELECT d.*, u.name as teacher_name, c.name as category_name, dept.name as department_name
-        FROM demands d
-        JOIN users u ON d.teacher_id = u.id
-        JOIN categories c ON d.category_id = c.id
-        LEFT JOIN departments dept ON u.department_id = dept.id
-        WHERE d.demand_list_id = ?
-        ORDER BY d.created_at DESC
-    `;
-    
-    db.query(query, [req.params.id], (err, results) => {
-        if (err) {
-            return res.status(500).json({ error: "Erreur serveur" });
-        }
-        res.json(results);
     });
 });
 
