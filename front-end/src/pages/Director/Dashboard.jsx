@@ -85,9 +85,60 @@ const DirectorDashboard = () => {
     setTimeout(() => setAlert({ show: false, message: '', type: 'info' }), 5000);
   };
 
+  const validateDate = (dateString) => {
+    if (!dateString) return true; // Date optionnelle
+    
+    const datePattern = /^(\d{2})\/(\d{2})\/(\d{2})$/;
+    const match = dateString.match(datePattern);
+    
+    if (!match) return false;
+    
+    const [, day, month, year] = match;
+    const dayNum = parseInt(day, 10);
+    const monthNum = parseInt(month, 10);
+    const yearNum = parseInt(`20${year}`, 10);
+    
+    // Vérifications de base
+    if (dayNum < 1 || dayNum > 31) return false;
+    if (monthNum < 1 || monthNum > 12) return false;
+    if (yearNum < 2024 || yearNum > 2099) return false;
+    
+    // Vérifier que la date est valide
+    const date = new Date(yearNum, monthNum - 1, dayNum);
+    return date.getFullYear() === yearNum && 
+           date.getMonth() === monthNum - 1 && 
+           date.getDate() === dayNum;
+  };
+
   const handleCreateList = async () => {
     try {
-      await axios.post('/api/demand-lists', formData, axiosConfig);
+      // Valider la date si elle est fournie
+      if (formData.deadline && !validateDate(formData.deadline)) {
+        showAlert('Format de date invalide. Utilisez DD/MM/YY (ex: 25/12/24)', 'error');
+        return;
+      }
+      
+      // Convertir la date au format ISO pour l'envoi au serveur
+      let deadline = formData.deadline;
+      if (deadline) {
+        // Si on a une date au format DD/MM/YY, la convertir
+        const datePattern = /^(\d{2})\/(\d{2})\/(\d{2})$/;
+        const match = deadline.match(datePattern);
+        if (match) {
+          const [, day, month, year] = match;
+          // Convertir YY en YYYY (20YY)
+          const fullYear = `20${year}`;
+          // Créer la date avec l'heure par défaut 23:59
+          deadline = `${fullYear}-${month}-${day}T23:59:00`;
+        }
+      }
+      
+      const dataToSend = {
+        ...formData,
+        deadline: deadline
+      };
+      
+      await axios.post('/api/demand-lists', dataToSend, axiosConfig);
       showAlert('Liste créée avec succès', 'success');
       setOpenDialog(false);
       setFormData({});
@@ -312,10 +363,36 @@ const DirectorDashboard = () => {
   };
 
   const handleInputChange = (field, value) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: value
-    }));
+    // Validation spéciale pour la date limite
+    if (field === 'deadline' && value) {
+      // Permettre seulement les chiffres et les slashes
+      const cleanValue = value.replace(/[^\d\/]/g, '');
+      
+      // Formatage automatique pendant la saisie
+      let formattedValue = cleanValue;
+      if (cleanValue.length >= 2 && cleanValue.indexOf('/') === -1) {
+        formattedValue = cleanValue.substring(0, 2) + '/' + cleanValue.substring(2);
+      }
+      if (cleanValue.length >= 5 && cleanValue.split('/').length === 2) {
+        const parts = cleanValue.split('/');
+        formattedValue = parts[0] + '/' + parts[1].substring(0, 2) + '/' + parts[1].substring(2);
+      }
+      
+      // Limiter à 8 caractères max (DD/MM/YY)
+      if (formattedValue.length > 8) {
+        formattedValue = formattedValue.substring(0, 8);
+      }
+      
+      setFormData(prev => ({
+        ...prev,
+        [field]: formattedValue
+      }));
+    } else {
+      setFormData(prev => ({
+        ...prev,
+        [field]: value
+      }));
+    }
   };
 
   const getStatusColor = (status) => {
@@ -323,6 +400,39 @@ const DirectorDashboard = () => {
       case 'open': return 'success';
       case 'closed': return 'default';
       default: return 'default';
+    }
+  };
+
+  const getTimeUntilDeadline = (deadline) => {
+    if (!deadline) return null;
+    
+    const now = new Date();
+    const deadlineDate = new Date(deadline);
+    const diffMs = deadlineDate - now;
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffDays = Math.floor(diffHours / 24);
+    
+    if (diffMs < 0) {
+      return { text: 'Expirée', color: 'error', expired: true };
+    } else if (diffHours < 24) {
+      return { text: `${diffHours}h restantes`, color: 'error', expired: false };
+    } else if (diffDays < 3) {
+      return { text: `${diffDays}j restants`, color: 'warning', expired: false };
+    } else {
+      return { text: `${diffDays}j restants`, color: 'info', expired: false };
+    }
+  };
+
+  const handleCheckExpiredLists = async () => {
+    try {
+      await axios.post('/api/demand-lists/check-expired', {}, axiosConfig);
+      showAlert('Vérification des listes expirées lancée', 'info');
+      // Actualiser les données après quelques secondes
+      setTimeout(() => {
+        fetchData();
+      }, 2000);
+    } catch (error) {
+      showAlert('Erreur lors de la vérification des listes expirées', 'error');
     }
   };
 
@@ -364,12 +474,16 @@ const DirectorDashboard = () => {
             {dialogType === 'list' && (
               <TextField
                 fullWidth
-                type="datetime-local"
-                label="Date limite"
+                label="Date limite (DD/MM/YY)"
                 value={formData.deadline || ''}
                 onChange={(e) => handleInputChange('deadline', e.target.value)}
                 margin="normal"
-                InputLabelProps={{ shrink: true }}
+                placeholder="25/12/24"
+                helperText="Format : DD/MM/YY - L'heure sera automatiquement fixée à 23h59"
+                inputProps={{
+                  pattern: "^(0[1-9]|[12][0-9]|3[01])/(0[1-9]|1[0-2])/[0-9]{2}$",
+                  title: "Format requis : DD/MM/YY (ex: 25/12/24)"
+                }}
               />
             )}
           </Box>
@@ -471,9 +585,19 @@ const DirectorDashboard = () => {
       {/* Listes de demandes */}
       <Card sx={{ mb: 3 }}>
         <CardContent>
-          <Typography variant="h6" gutterBottom>
-            Listes de demandes
-          </Typography>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Typography variant="h6">
+              Listes de demandes
+            </Typography>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={handleCheckExpiredLists}
+              sx={{ ml: 2 }}
+            >
+              Vérifier les expirations
+            </Button>
+          </Box>
           <TableContainer>
             <Table>
               <TableHead>
@@ -481,63 +605,77 @@ const DirectorDashboard = () => {
                   <TableCell>Titre</TableCell>
                   <TableCell>Description</TableCell>
                   <TableCell>Date limite</TableCell>
+                  <TableCell>Temps restant</TableCell>
                   <TableCell>Statut</TableCell>
                   <TableCell>Actions</TableCell>
                   <TableCell>Export</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {demandLists.map((list) => (
-                  <TableRow key={list.id}>
-                    <TableCell>{list.title}</TableCell>
-                    <TableCell>{list.description}</TableCell>
-                    <TableCell>
-                      {list.deadline ? new Date(list.deadline).toLocaleDateString('fr-FR') : 'Non définie'}
-                    </TableCell>
-                    <TableCell>
-                      <Chip
-                        label={list.status === 'open' ? 'Ouverte' : 'Fermée'}
-                        color={getStatusColor(list.status)}
-                        size="small"
-                      />
-                    </TableCell>
-                    <TableCell>
-                      {list.status === 'open' ? (
-                        <Tooltip title="Fermer définitivement">
-                          <IconButton
-                            onClick={() => handleToggleListStatus(list.id, list.status)}
-                            color="error"
-                          >
-                            <CloseIcon />
-                          </IconButton>
-                        </Tooltip>
-                      ) : (
-                        <Tooltip title="Gérer les validations de cette liste">
-                          <IconButton
-                            onClick={() => navigate(`/demands-review/${list.id}`)}
-                            color="primary"
-                          >
-                            <EditIcon />
-                          </IconButton>
-                        </Tooltip>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Tooltip title={list.status === 'closed' ? 'Exporter les demandes de cette liste' : 'Export disponible après fermeture'}>
-                        <span>
-                          <IconButton
-                            onClick={() => exportListToExcel(list.id, list.title)}
-                            color="success"
+                {demandLists.map((list) => {
+                  const timeInfo = getTimeUntilDeadline(list.deadline);
+                  return (
+                    <TableRow key={list.id}>
+                      <TableCell>{list.title}</TableCell>
+                      <TableCell>{list.description}</TableCell>
+                      <TableCell>
+                        {list.deadline ? new Date(list.deadline).toLocaleDateString('fr-FR') : 'Non définie'}
+                      </TableCell>
+                      <TableCell>
+                        {timeInfo && (
+                          <Chip
+                            label={timeInfo.text}
+                            color={timeInfo.color}
                             size="small"
-                            disabled={list.status !== 'closed'}
-                          >
-                            <FileDownloadIcon fontSize="small" />
-                          </IconButton>
-                        </span>
-                      </Tooltip>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                            variant={timeInfo.expired ? 'filled' : 'outlined'}
+                          />
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Chip
+                          label={list.status === 'open' ? 'Ouverte' : 'Fermée'}
+                          color={getStatusColor(list.status)}
+                          size="small"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        {list.status === 'open' ? (
+                          <Tooltip title="Fermer définitivement">
+                            <IconButton
+                              onClick={() => handleToggleListStatus(list.id, list.status)}
+                              color="error"
+                            >
+                              <CloseIcon />
+                            </IconButton>
+                          </Tooltip>
+                        ) : (
+                          <Tooltip title="Gérer les validations de cette liste">
+                            <IconButton
+                              onClick={() => navigate(`/demands-review/${list.id}`)}
+                              color="primary"
+                            >
+                              <EditIcon />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Tooltip title={list.status === 'closed' ? 'Exporter les demandes de cette liste' : 'Export disponible après fermeture'}>
+                          <span>
+                            <IconButton
+                              onClick={() => exportListToExcel(list.id, list.title)}
+                              color="success"
+                              size="small"
+                              disabled={list.status !== 'closed'}
+                            >
+                              <FileDownloadIcon fontSize="small" />
+                            </IconButton>
+                          </span>
+                        </Tooltip>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </TableContainer>

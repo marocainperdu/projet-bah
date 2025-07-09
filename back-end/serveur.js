@@ -54,6 +54,96 @@ const transporter = nodemailer.createTransporter({
     }
 });
 
+// Fonction pour fermer automatiquement les listes expirées
+const closeExpiredLists = () => {
+    console.log('Vérification des listes expirées...');
+    
+    const query = `
+        SELECT id, title, deadline, created_by 
+        FROM demand_lists 
+        WHERE status = 'open' AND deadline IS NOT NULL AND deadline < NOW()
+    `;
+    
+    db.query(query, (err, expiredLists) => {
+        if (err) {
+            console.error('Erreur lors de la vérification des listes expirées:', err);
+            return;
+        }
+        
+        if (expiredLists.length === 0) {
+            console.log('Aucune liste expirée trouvée');
+            return;
+        }
+        
+        console.log(`${expiredLists.length} liste(s) expirée(s) trouvée(s)`);
+        
+        // Fermer chaque liste expirée
+        expiredLists.forEach(list => {
+            const updateQuery = "UPDATE demand_lists SET status = 'closed' WHERE id = ?";
+            db.query(updateQuery, [list.id], (updateErr, results) => {
+                if (updateErr) {
+                    console.error(`Erreur lors de la fermeture de la liste ${list.id}:`, updateErr);
+                } else {
+                    console.log(`Liste "${list.title}" (ID: ${list.id}) fermée automatiquement`);
+                    
+                    // Optionnel : envoyer un email de notification au directeur
+                    notifyDirectorListClosed(list);
+                }
+            });
+        });
+    });
+};
+
+// Fonction pour notifier le directeur qu'une liste a été fermée automatiquement
+const notifyDirectorListClosed = async (list) => {
+    try {
+        // Récupérer les informations du directeur
+        const directorQuery = "SELECT name, email FROM users WHERE id = ?";
+        db.query(directorQuery, [list.created_by], async (err, directors) => {
+            if (err || directors.length === 0) {
+                console.error('Impossible de récupérer les informations du directeur');
+                return;
+            }
+            
+            const director = directors[0];
+            const mailOptions = {
+                from: process.env.EMAIL_FROM || process.env.EMAIL_USER,
+                to: director.email,
+                subject: 'Liste de demandes fermée automatiquement',
+                html: `
+                    <h2>Liste de demandes fermée automatiquement</h2>
+                    <p>Bonjour <strong>${director.name}</strong>,</p>
+                    <p>La liste de demandes suivante a été fermée automatiquement car sa date limite est dépassée :</p>
+                    <ul>
+                        <li><strong>Titre :</strong> ${list.title}</li>
+                        <li><strong>Date limite :</strong> ${new Date(list.deadline).toLocaleString('fr-FR')}</li>
+                        <li><strong>Date de fermeture :</strong> ${new Date().toLocaleString('fr-FR')}</li>
+                    </ul>
+                    <p>Vous pouvez maintenant :</p>
+                    <ol>
+                        <li>Consulter et valider les demandes soumises</li>
+                        <li>Exporter les données de cette liste</li>
+                        <li>Gérer les validations depuis votre tableau de bord</li>
+                    </ol>
+                    <p><strong>Lien vers le tableau de bord :</strong> <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/dashboard">Accéder au tableau de bord</a></p>
+                    <p>Cordialement,<br>Système de gestion des demandes</p>
+                `
+            };
+            
+            await transporter.sendMail(mailOptions);
+            console.log(`Email de notification envoyé à ${director.email} pour la liste "${list.title}"`);
+        });
+    } catch (error) {
+        console.error('Erreur lors de l\'envoi de l\'email de notification:', error);
+    }
+};
+
+// Planifier la vérification toutes les 5 minutes (300 000 ms)
+setInterval(closeExpiredLists, 5 * 60 * 1000);
+
+// Exécuter une première vérification au démarrage du serveur
+setTimeout(closeExpiredLists, 10000); // 10 secondes après le démarrage
+
 // Fonction pour envoyer un email de bienvenue
 const sendWelcomeEmail = async (userEmail, userName, userRole, temporaryPassword) => {
     const roleNames = {
@@ -670,6 +760,16 @@ app.put("/api/demand-lists/:id/status", authenticateToken, (req, res) => {
         }
         res.json({ message: "Statut mis à jour avec succès" });
     });
+});
+
+// Route pour vérifier manuellement les listes expirées
+app.post("/api/demand-lists/check-expired", authenticateToken, (req, res) => {
+    if (req.user.role !== 'director') {
+        return res.status(403).json({ error: "Accès non autorisé" });
+    }
+    
+    closeExpiredLists();
+    res.json({ message: "Vérification des listes expirées lancée" });
 });
 
 // Routes pour les demandes
