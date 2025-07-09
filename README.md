@@ -1,3 +1,18 @@
+# Démo en ligne
+
+Le site de démonstration est disponible à l'adresse suivante :
+**https://bah.moustaphaniang.com**
+
+## Identifiants de connexion
+
+Utilisez l'un des logins suivants (mot de passe pour tous : `passer`) :
+
+- directeur
+- chef.meca
+- prof.meca
+- prof.info
+- chef.info
+
 # 🏫 Plateforme de Gestion des Demandes d'Équipement
 
 ## 📋 Description
