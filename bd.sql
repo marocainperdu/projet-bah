@@ -46,7 +46,7 @@ CREATE TABLE `demand_lists` (
   `title` varchar(255) NOT NULL,
   `description` text,
   `created_by` int NOT NULL, -- référence vers le directeur
-  `status` enum('open','closed') DEFAULT 'open',
+  `status` enum('open','closed','completed') DEFAULT 'open',
   `deadline` timestamp NULL,
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

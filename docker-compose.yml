@@ -17,12 +17,10 @@ services:
         DB_USER: ${DB_USER}
         DB_PASSWORD: ${DB_PASSWORD}
         DB_NAME: ${DB_NAME}
-        JWT_SECRET: ${JWT_SECRET}
     ports:
       - "3015:3000"
     environment:
-      - DB_HOST="URL de la base de données"
-      - DB_USER="Nom d'utilisateur de la base de données"
-      - DB_PASSWORD="Mot de passe de la base de données"
-      - DB_NAME="Nom de la base de données (mbacke-demandes)"
-      - JWT_SECRET="Clé secrète pour JWT"
+      - DB_HOST="192.168.1.200"
+      - DB_USER="momo"
+      - DB_PASSWORD="7RZduvvO1a1rNA"
+      - DB_NAME="projet-bah"

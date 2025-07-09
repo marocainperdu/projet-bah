@@ -61,10 +61,41 @@ const authenticateToken = (req, res, next) => {
 };
 
 // Routes d'authentification
-// Route d'inscription désactivée - seul le directeur peut créer des utilisateurs
-// app.post("/api/register", async (req, res) => {
-//     res.status(403).json({ error: "L'inscription publique est désactivée. Contactez l'administrateur." });
-// });
+app.post("/api/register", async (req, res) => {
+    const { email, password, name, role, department_id } = req.body;
+
+    try {
+        // Vérifier si l'utilisateur existe déjà
+        const checkUserQuery = "SELECT * FROM users WHERE email = ?";
+        db.query(checkUserQuery, [email], async (err, results) => {
+            if (err) {
+                return res.status(500).json({ error: "Erreur serveur" });
+            }
+
+            if (results.length > 0) {
+                return res.status(400).json({ error: "Un utilisateur avec cet email existe déjà" });
+            }
+
+            // Hacher le mot de passe
+            const hashedPassword = await bcrypt.hash(password, 10);
+
+            // Insérer le nouvel utilisateur
+            const insertQuery = "INSERT INTO users (email, password, name, role, department_id) VALUES (?, ?, ?, ?, ?)";
+            db.query(insertQuery, [email, hashedPassword, name, role, department_id], (err, results) => {
+                if (err) {
+                    return res.status(500).json({ error: "Erreur lors de l'inscription" });
+                }
+
+                res.status(201).json({
+                    message: "Utilisateur créé avec succès",
+                    userId: results.insertId
+                });
+            });
+        });
+    } catch (error) {
+        res.status(500).json({ error: "Erreur serveur" });
+    }
+});
 
 app.post("/api/login", (req, res) => {
     const { email, password } = req.body;
@@ -115,6 +146,153 @@ app.post("/api/login", (req, res) => {
                 department_name: user.department_name
             }
         });
+    });
+});
+
+// Routes pour la gestion des utilisateurs (CRUD)
+app.get("/api/users", authenticateToken, (req, res) => {
+    if (req.user.role !== 'director') {
+        return res.status(403).json({ error: "Accès non autorisé" });
+    }
+
+    const query = `
+        SELECT u.id, u.name, u.email, u.role, u.department_id, u.created_at,
+               d.name as department_name
+        FROM users u 
+        LEFT JOIN departments d ON u.department_id = d.id 
+        ORDER BY u.name
+    `;
+    
+    db.query(query, (err, results) => {
+        if (err) {
+            return res.status(500).json({ error: "Erreur serveur" });
+        }
+        res.json(results);
+    });
+});
+
+app.post("/api/users", authenticateToken, async (req, res) => {
+    if (req.user.role !== 'director') {
+        return res.status(403).json({ error: "Accès non autorisé" });
+    }
+
+    const { email, password, name, role, department_id } = req.body;
+
+    if (!email || !password || !name || !role) {
+        return res.status(400).json({ error: "Tous les champs obligatoires doivent être renseignés" });
+    }
+
+    try {
+        // Vérifier si l'utilisateur existe déjà
+        const checkUserQuery = "SELECT * FROM users WHERE email = ?";
+        db.query(checkUserQuery, [email], async (err, results) => {
+            if (err) {
+                return res.status(500).json({ error: "Erreur serveur" });
+            }
+
+            if (results.length > 0) {
+                return res.status(400).json({ error: "Un utilisateur avec cet email existe déjà" });
+            }
+
+            // Hacher le mot de passe
+            const hashedPassword = await bcrypt.hash(password, 10);
+
+            // Insérer le nouvel utilisateur
+            const insertQuery = "INSERT INTO users (email, password, name, role, department_id) VALUES (?, ?, ?, ?, ?)";
+            db.query(insertQuery, [email, hashedPassword, name, role, department_id || null], (err, results) => {
+                if (err) {
+                    return res.status(500).json({ error: "Erreur lors de la création de l'utilisateur" });
+                }
+
+                res.status(201).json({
+                    message: "Utilisateur créé avec succès",
+                    userId: results.insertId
+                });
+            });
+        });
+    } catch (error) {
+        res.status(500).json({ error: "Erreur serveur" });
+    }
+});
+
+app.put("/api/users/:id", authenticateToken, async (req, res) => {
+    if (req.user.role !== 'director') {
+        return res.status(403).json({ error: "Accès non autorisé" });
+    }
+
+    const userId = req.params.id;
+    const { email, password, name, role, department_id } = req.body;
+
+    if (!email || !name || !role) {
+        return res.status(400).json({ error: "Les champs email, nom et rôle sont obligatoires" });
+    }
+
+    try {
+        // Vérifier si l'email est déjà utilisé par un autre utilisateur
+        const checkEmailQuery = "SELECT id FROM users WHERE email = ? AND id != ?";
+        db.query(checkEmailQuery, [email, userId], async (err, results) => {
+            if (err) {
+                return res.status(500).json({ error: "Erreur serveur" });
+            }
+
+            if (results.length > 0) {
+                return res.status(400).json({ error: "Cet email est déjà utilisé par un autre utilisateur" });
+            }
+
+            let updateQuery;
+            let updateParams;
+
+            if (password) {
+                // Mise à jour avec nouveau mot de passe
+                const hashedPassword = await bcrypt.hash(password, 10);
+                updateQuery = "UPDATE users SET email = ?, password = ?, name = ?, role = ?, department_id = ? WHERE id = ?";
+                updateParams = [email, hashedPassword, name, role, department_id || null, userId];
+            } else {
+                // Mise à jour sans changer le mot de passe
+                updateQuery = "UPDATE users SET email = ?, name = ?, role = ?, department_id = ? WHERE id = ?";
+                updateParams = [email, name, role, department_id || null, userId];
+            }
+
+            db.query(updateQuery, updateParams, (err, results) => {
+                if (err) {
+                    return res.status(500).json({ error: "Erreur lors de la mise à jour de l'utilisateur" });
+                }
+
+                if (results.affectedRows === 0) {
+                    return res.status(404).json({ error: "Utilisateur non trouvé" });
+                }
+
+                res.json({ message: "Utilisateur mis à jour avec succès" });
+            });
+        });
+    } catch (error) {
+        res.status(500).json({ error: "Erreur serveur" });
+    }
+});
+
+app.delete("/api/users/:id", authenticateToken, (req, res) => {
+    if (req.user.role !== 'director') {
+        return res.status(403).json({ error: "Accès non autorisé" });
+    }
+
+    const userId = req.params.id;
+
+    // Empêcher la suppression de son propre compte
+    if (parseInt(userId) === req.user.userId) {
+        return res.status(400).json({ error: "Vous ne pouvez pas supprimer votre propre compte" });
+    }
+
+    const deleteQuery = "DELETE FROM users WHERE id = ?";
+    db.query(deleteQuery, [userId], (err, results) => {
+        if (err) {
+            return res.status(500).json({ error: "Erreur lors de la suppression de l'utilisateur" });
+        }
+
+        if (results.affectedRows === 0) {
+            return res.status(404).json({ error: "Utilisateur non trouvé" });
+        }
+
+        res.json({ message: "Utilisateur supprimé avec succès" });
     });
 });
 
@@ -211,13 +389,125 @@ app.put("/api/demand-lists/:id/status", authenticateToken, (req, res) => {
     }
 
     const { status } = req.body;
+    
+    // Vérifier que le statut est valide
+    if (!['open', 'closed', 'completed'].includes(status)) {
+        return res.status(400).json({ error: "Statut invalide" });
+    }
+    
+    // Si on ferme une liste (passage de 'open' à 'closed'), on la marque comme 'completed' (définitivement fermée)
+    let finalStatus = status;
+    if (status === 'closed') {
+        finalStatus = 'completed';
+    }
+    
     const query = "UPDATE demand_lists SET status = ? WHERE id = ?";
     
-    db.query(query, [status, req.params.id], (err, results) => {
+    db.query(query, [finalStatus, req.params.id], (err, results) => {
         if (err) {
             return res.status(500).json({ error: "Erreur lors de la mise à jour" });
         }
         res.json({ message: "Statut mis à jour avec succès" });
+    });
+});
+
+// Route pour supprimer une liste de demandes fermée
+app.delete("/api/demand-lists/:id", authenticateToken, (req, res) => {
+    if (req.user.role !== 'director') {
+        return res.status(403).json({ error: "Accès non autorisé" });
+    }
+
+    const listId = req.params.id;
+
+    // Vérifier que la liste existe et qu'elle est fermée (completed)
+    const checkStatusQuery = "SELECT status FROM demand_lists WHERE id = ?";
+    db.query(checkStatusQuery, [listId], (err, results) => {
+        if (err) {
+            return res.status(500).json({ error: "Erreur serveur" });
+        }
+
+        if (results.length === 0) {
+            return res.status(404).json({ error: "Liste de demandes non trouvée" });
+        }
+
+        if (results[0].status !== 'completed') {
+            return res.status(400).json({ error: "Seules les listes fermées définitivement peuvent être supprimées" });
+        }
+
+        // Supprimer en cascade : d'abord les évaluations, puis les demandes, puis la liste
+        db.beginTransaction((err) => {
+            if (err) {
+                return res.status(500).json({ error: "Erreur de transaction" });
+            }
+
+            // 1. Supprimer les évaluations des demandes de cette liste
+            const deleteEvaluationsQuery = `
+                DELETE de FROM demand_evaluations de
+                JOIN demands d ON de.demand_id = d.id
+                WHERE d.demand_list_id = ?
+            `;
+            
+            db.query(deleteEvaluationsQuery, [listId], (err, results) => {
+                if (err) {
+                    return db.rollback(() => {
+                        res.status(500).json({ error: "Erreur lors de la suppression des évaluations" });
+                    });
+                }
+
+                // 2. Supprimer les demandes de cette liste
+                const deleteDemandsQuery = "DELETE FROM demands WHERE demand_list_id = ?";
+                db.query(deleteDemandsQuery, [listId], (err, results) => {
+                    if (err) {
+                        return db.rollback(() => {
+                            res.status(500).json({ error: "Erreur lors de la suppression des demandes" });
+                        });
+                    }
+
+                    // 3. Supprimer la liste elle-même
+                    const deleteListQuery = "DELETE FROM demand_lists WHERE id = ?";
+                    db.query(deleteListQuery, [listId], (err, results) => {
+                        if (err) {
+                            return db.rollback(() => {
+                                res.status(500).json({ error: "Erreur lors de la suppression de la liste" });
+                            });
+                        }
+
+                        db.commit((err) => {
+                            if (err) {
+                                return db.rollback(() => {
+                                    res.status(500).json({ error: "Erreur de validation" });
+                                });
+                            }
+                            res.json({ message: "Liste de demandes supprimée avec succès" });
+                        });
+                    });
+                });
+            });
+        });
+    });
+});
+
+// Route pour obtenir les demandes d'une liste spécifique
+app.get("/api/demand-lists/:id/demands", authenticateToken, (req, res) => {
+    if (req.user.role !== 'director') {
+        return res.status(403).json({ error: "Accès non autorisé" });
+    }
+
+    const query = `
+        SELECT d.*, u.name as teacher_name, c.name as category_name, dept.name as department_name
+        FROM demands d
+        JOIN users u ON d.teacher_id = u.id
+        JOIN categories c ON d.category_id = c.id
+        LEFT JOIN departments dept ON u.department_id = dept.id
+        WHERE d.demand_list_id = ?
+        ORDER BY d.created_at DESC
+    `;
+    
+    db.query(query, [req.params.id], (err, results) => {
+        if (err) {
+            return res.status(500).json({ error: "Erreur serveur" });
+        }
+        res.json(results);
     });
 });
 
@@ -402,166 +692,3 @@ app.listen(PORT, () => {
 });
 
 module.exports = app;
-
-// Routes pour la gestion des utilisateurs (directeur seulement)
-app.get("/api/users", authenticateToken, (req, res) => {
-    if (req.user.role !== 'director') {
-        return res.status(403).json({ error: "Accès non autorisé" });
-    }
-
-    const query = `
-        SELECT u.id, u.email, u.name, u.role, u.department_id, d.name as department_name
-        FROM users u 
-        LEFT JOIN departments d ON u.department_id = d.id 
-        ORDER BY u.name
-    `;
-    
-    db.query(query, (err, results) => {
-        if (err) {
-            return res.status(500).json({ error: "Erreur serveur" });
-        }
-        res.json(results);
-    });
-});
-
-app.post("/api/users", authenticateToken, async (req, res) => {
-    if (req.user.role !== 'director') {
-        return res.status(403).json({ error: "Accès non autorisé" });
-    }
-
-    const { email, password, name, role, department_id } = req.body;
-
-    if (!email || !password || !name || !role) {
-        return res.status(400).json({ error: "Tous les champs requis doivent être remplis" });
-    }
-
-    try {
-        // Vérifier si l'utilisateur existe déjà
-        const checkQuery = "SELECT * FROM users WHERE email = ?";
-        db.query(checkQuery, [email], async (err, results) => {
-            if (err) {
-                return res.status(500).json({ error: "Erreur serveur" });
-            }
-
-            if (results.length > 0) {
-                return res.status(400).json({ error: "Un utilisateur avec cet email existe déjà" });
-            }
-
-            // Hacher le mot de passe
-            const hashedPassword = await bcrypt.hash(password, 10);
-
-            // Insérer le nouvel utilisateur
-            const insertQuery = "INSERT INTO users (email, password, name, role, department_id) VALUES (?, ?, ?, ?, ?)";
-            db.query(insertQuery, [email, hashedPassword, name, role, department_id || null], (err, results) => {
-                if (err) {
-                    return res.status(500).json({ error: "Erreur lors de la création de l'utilisateur" });
-                }
-                res.status(201).json({
-                    message: "Utilisateur créé avec succès",
-                    userId: results.insertId
-                });
-            });
-        });
-    } catch (error) {
-        res.status(500).json({ error: "Erreur serveur" });
-    }
-});
-
-app.put("/api/users/:id", authenticateToken, async (req, res) => {
-    if (req.user.role !== 'director') {
-        return res.status(403).json({ error: "Accès non autorisé" });
-    }
-
-    const userId = req.params.id;
-    const { email, password, name, role, department_id } = req.body;
-
-    if (!email || !name || !role) {
-        return res.status(400).json({ error: "Tous les champs requis doivent être remplis" });
-    }
-
-    try {
-        let updateQuery = "UPDATE users SET email = ?, name = ?, role = ?, department_id = ?";
-        let queryParams = [email, name, role, department_id || null];
-
-        if (password && password.trim() !== '') {
-            const hashedPassword = await bcrypt.hash(password, 10);
-            updateQuery += ", password = ?";
-            queryParams.push(hashedPassword);
-        }
-
-        updateQuery += " WHERE id = ?";
-        queryParams.push(userId);
-
-        db.query(updateQuery, queryParams, (err, results) => {
-            if (err) {
-                return res.status(500).json({ error: "Erreur lors de la modification de l'utilisateur" });
-            }
-            res.json({ message: "Utilisateur modifié avec succès" });
-        });
-    } catch (error) {
-        res.status(500).json({ error: "Erreur serveur" });
-    }
-});
-
-app.delete("/api/users/:id", authenticateToken, (req, res) => {
-    if (req.user.role !== 'director') {
-        return res.status(403).json({ error: "Accès non autorisé" });
-    }
-
-    const userId = req.params.id;
-
-    // Empêcher la suppression de son propre compte
-    if (parseInt(userId) === req.user.userId) {
-        return res.status(400).json({ error: "Vous ne pouvez pas supprimer votre propre compte" });
-    }
-
-    const deleteQuery = "DELETE FROM users WHERE id = ?";
-    db.query(deleteQuery, [userId], (err, results) => {
-        if (err) {
-            return res.status(500).json({ error: "Erreur lors de la suppression de l'utilisateur" });
-        }
-        res.json({ message: "Utilisateur supprimé avec succès" });
-    });
-});
-
-// Routes de test sans base de données
-app.get("/api/test-departments", (req, res) => {
-    res.json([
-        { id: 1, name: "Informatique", description: "Département d'informatique" },
-        { id: 2, name: "Mathématiques", description: "Département de mathématiques" },
-        { id: 3, name: "Physique", description: "Département de physique" }
-    ]);
-});
-
-app.post("/api/test-login", (req, res) => {
-    const { email, password } = req.body;
-    
-    // Utilisateur de test
-    if (email === "test@test.com" && password === "passer") {
-        const token = jwt.sign(
-            { 
-                userId: 1, 
-                email: email, 
-                role: "director",
-                department_id: 1 
-            },
-            process.env.JWT_SECRET || 'secret_key',
-            { expiresIn: '24h' }
-        );
-
-        res.json({
-            message: "Connexion réussie",
-            token,
-            user: {
-                id: 1,
-                email: email,
-                name: "Utilisateur Test",
-                role: "director",
-                department_id: 1,
-                department_name: "Informatique"
-            }
-        });
-    } else {
-        res.status(401).json({ error: "Email ou mot de passe incorrect" });
-    }
-});

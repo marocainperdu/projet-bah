@@ -44,25 +44,42 @@ function UserManagement() {
     const [loading, setLoading] = useState(false);
 
     useEffect(() => {
+        console.log('UserManagement - Token:', localStorage.getItem('token'));
+        console.log('UserManagement - User:', localStorage.getItem('user'));
+        
         fetchUsers();
         fetchDepartments();
     }, []);
 
     const fetchUsers = async () => {
         try {
-            const response = await axios.get('/api/users');
+            console.log('Token présent:', !!localStorage.getItem('token'));
+            const token = localStorage.getItem('token');
+            const response = await axios.get('/api/users', {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            });
             setUsers(response.data);
         } catch (err) {
-            setError('Erreur lors du chargement des utilisateurs');
+            console.error('Erreur fetchUsers:', err.response || err);
+            setError('Erreur lors du chargement des utilisateurs: ' + (err.response?.data?.error || err.message));
         }
     };
 
     const fetchDepartments = async () => {
         try {
-            const response = await axios.get('/api/departments');
+            console.log('Token présent:', !!localStorage.getItem('token'));
+            const token = localStorage.getItem('token');
+            const response = await axios.get('/api/departments', {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            });
             setDepartments(response.data);
         } catch (err) {
-            setError('Erreur lors du chargement des départements');
+            console.error('Erreur fetchDepartments:', err.response || err);
+            setError('Erreur lors du chargement des départements: ' + (err.response?.data?.error || err.message));
         }
     };
 
@@ -108,6 +125,13 @@ function UserManagement() {
         setError('');
 
         try {
+            const token = localStorage.getItem('token');
+            const config = {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            };
+
             if (editingUser) {
                 // Modification
                 const updateData = {
@@ -119,11 +143,11 @@ function UserManagement() {
                 if (formData.password) {
                     updateData.password = formData.password;
                 }
-                await axios.put(`/api/users/${editingUser.id}`, updateData);
+                await axios.put(`/api/users/${editingUser.id}`, updateData, config);
                 setSuccess('Utilisateur modifié avec succès');
             } else {
                 // Création
-                await axios.post('/api/users', formData);
+                await axios.post('/api/users', formData, config);
                 setSuccess('Utilisateur créé avec succès');
             }
             
@@ -139,7 +163,13 @@ function UserManagement() {
     const handleDelete = async (userId) => {
         if (window.confirm('Êtes-vous sûr de vouloir supprimer cet utilisateur ?')) {
             try {
-                await axios.delete(`/api/users/${userId}`);
+                const token = localStorage.getItem('token');
+                const config = {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                };
+                await axios.delete(`/api/users/${userId}`, config);
                 setSuccess('Utilisateur supprimé avec succès');
                 fetchUsers();
             } catch (err) {

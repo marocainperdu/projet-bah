@@ -28,7 +28,9 @@ import {
   Edit as EditIcon,
   Close as CloseIcon,
   Visibility as ViewIcon,
-  People as PeopleIcon
+  Assessment as AssessmentIcon,
+  People as PeopleIcon,
+  Delete as DeleteIcon
 } from '@mui/icons-material';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
@@ -116,12 +118,37 @@ const DirectorDashboard = () => {
 
   const handleToggleListStatus = async (listId, currentStatus) => {
     try {
+      // Une fois fermée, une liste ne peut plus être rouverte
+      if (currentStatus === 'completed') {
+        showAlert('Cette liste est définitivement fermée et ne peut plus être rouverte', 'warning');
+        return;
+      }
+      
       const newStatus = currentStatus === 'open' ? 'closed' : 'open';
       await axios.put(`/api/demand-lists/${listId}/status`, { status: newStatus }, axiosConfig);
-      showAlert(`Liste ${newStatus === 'open' ? 'ouverte' : 'fermée'} avec succès`, 'success');
+      showAlert(`Liste ${newStatus === 'open' ? 'ouverte' : 'fermée définitivement'} avec succès`, 'success');
       fetchData();
     } catch (error) {
       showAlert('Erreur lors de la mise à jour du statut', 'error');
+    }
+  };
+
+  const handleViewListDemands = (listId, listTitle) => {
+    // Rediriger vers une page de consultation des demandes de cette liste
+    // ou ouvrir un modal avec les demandes
+    navigate(`/demands-review/${listId}`, { state: { listTitle } });
+  };
+
+  const handleDeleteList = async (listId, listTitle) => {
+    if (window.confirm(`Êtes-vous sûr de vouloir supprimer définitivement la liste "${listTitle}" et toutes ses demandes associées ? Cette action est irréversible.`)) {
+      try {
+        await axios.delete(`/api/demand-lists/${listId}`, axiosConfig);
+        showAlert('Liste supprimée avec succès', 'success');
+        fetchData();
+      } catch (error) {
+        const errorMessage = error.response?.data?.error || 'Erreur lors de la suppression de la liste';
+        showAlert(errorMessage, 'error');
+      }
     }
   };
 
@@ -141,8 +168,18 @@ const DirectorDashboard = () => {
   const getStatusColor = (status) => {
     switch (status) {
       case 'open': return 'success';
+      case 'completed': return 'default';
       case 'closed': return 'default';
       default: return 'default';
+    }
+  };
+
+  const getStatusLabel = (status) => {
+    switch (status) {
+      case 'open': return 'Ouverte';
+      case 'completed': return 'Fermée définitivement';
+      case 'closed': return 'Fermée';
+      default: return status;
     }
   };
 
@@ -324,19 +361,41 @@ const DirectorDashboard = () => {
                     </TableCell>
                     <TableCell>
                       <Chip
-                        label={list.status === 'open' ? 'Ouverte' : 'Fermée'}
+                        label={getStatusLabel(list.status)}
                         color={getStatusColor(list.status)}
                         size="small"
                       />
                     </TableCell>
                     <TableCell>
-                      <Tooltip title={list.status === 'open' ? 'Fermer' : 'Ouvrir'}>
-                        <IconButton
-                          onClick={() => handleToggleListStatus(list.id, list.status)}
-                        >
-                          {list.status === 'open' ? <CloseIcon /> : <EditIcon />}
-                        </IconButton>
-                      </Tooltip>
+                      {list.status === 'open' ? (
+                        <Tooltip title="Fermer définitivement">
+                          <IconButton
+                            onClick={() => handleToggleListStatus(list.id, list.status)}
+                            color="warning"
+                          >
+                            <CloseIcon />
+                          </IconButton>
+                        </Tooltip>
+                      ) : list.status === 'completed' ? (
+                        <Box sx={{ display: 'flex', gap: 1 }}>
+                          <Tooltip title="Consulter les demandes">
+                            <IconButton
+                              onClick={() => handleViewListDemands(list.id, list.title)}
+                              color="primary"
+                            >
+                              <AssessmentIcon />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Supprimer la liste">
+                            <IconButton
+                              onClick={() => handleDeleteList(list.id, list.title)}
+                              color="error"
+                            >
+                              <DeleteIcon />
+                            </IconButton>
+                          </Tooltip>
+                        </Box>
+                      ) : null}
                     </TableCell>
                   </TableRow>
                 ))}
