@@ -6,7 +6,6 @@ WORKDIR /app
 
 # Copier les fichiers nécessaires
 COPY package*.json ./
-COPY src/config.js.template ./src/config.js
 COPY . .
 
 # Installer les dépendances et builder le projet

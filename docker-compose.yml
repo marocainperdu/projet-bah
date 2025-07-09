@@ -13,14 +13,10 @@ services:
       context: ./back-end
       dockerfile: Dockerfile
       args:
-        DB_HOST: ${DB_HOST}
-        DB_USER: ${DB_USER}
-        DB_PASSWORD: ${DB_PASSWORD}
-        DB_NAME: ${DB_NAME}
+        DB_HOST: "192.168.1.200"
+        DB_USER: "momo"
+        DB_PASSWORD: "7RZduvvO1a1rNA"
+        DB_NAME: "projet-bah"
     ports:
       - "3015:3000"
-    environment:
-      - DB_HOST="192.168.1.200"
-      - DB_USER="momo"
-      - DB_PASSWORD="7RZduvvO1a1rNA"
-      - DB_NAME="projet-bah"
+
