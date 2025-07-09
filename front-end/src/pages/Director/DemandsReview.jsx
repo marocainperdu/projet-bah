@@ -35,6 +35,11 @@ import {
 import axios from 'axios';
 
 const DemandsReview = () => {
+  // Fonction utilitaire pour format FCFA
+  const formatFCFA = (amount) => {
+    if (amount === null || amount === undefined || isNaN(Number(amount))) return '';
+    return new Intl.NumberFormat('fr-FR').format(Number(amount)) + ' FCFA';
+  };
   const { listId } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
@@ -194,7 +199,7 @@ const DemandsReview = () => {
                       <TableCell>{demand.title}</TableCell>
                       <TableCell>{demand.category_name}</TableCell>
                       <TableCell>
-                        {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(demand.estimated_price)}
+                        {formatFCFA(demand.estimated_price)}
                       </TableCell>
                       <TableCell>
                         <Chip
@@ -262,7 +267,7 @@ const DemandsReview = () => {
                     <TableCell>{demand.title}</TableCell>
                     <TableCell>{demand.category_name}</TableCell>
                     <TableCell>
-                      {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(demand.estimated_price)}
+                      {formatFCFA(demand.estimated_price)}
                     </TableCell>
                     <TableCell>
                       <Chip
@@ -321,7 +326,7 @@ const DemandsReview = () => {
                 <Grid item xs={12} md={4}>
                   <Typography variant="body2" color="text.secondary">Prix estimé</Typography>
                   <Typography variant="body1">
-                    {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(selectedDemand.estimated_price)}
+                    {formatFCFA(selectedDemand.estimated_price)}
                   </Typography>
                 </Grid>
                 <Grid item xs={12} md={4}>

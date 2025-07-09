@@ -9,6 +9,7 @@ import DirectorDashboard from './pages/Director/Dashboard';
 import DirectorDemands from './pages/Director/Demands';
 import UserManagement from './pages/Director/UserManagement';
 import DemandsReview from './pages/Director/DemandsReview';
+import CategoryManagement from './pages/Director/CategoryManagement';
 import DepartmentHeadDemands from './pages/DepartmentHead/Demands';
 import TeacherDemands from './pages/Teacher/Demands';
 
@@ -26,6 +27,7 @@ const App = () => {
         <Route path="/director/dashboard" element={<DirectorDashboard />} />
         <Route path="/director/demands" element={<DirectorDemands />} />
         <Route path="/user-management" element={<UserManagement />} />
+        <Route path="/category-management" element={<CategoryManagement />} />
         <Route path="/demands-review/:listId" element={<DemandsReview />} />
         
         {/* Routes pour les chefs de département */}

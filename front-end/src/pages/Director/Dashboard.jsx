@@ -30,7 +30,8 @@ import {
   Visibility as ViewIcon,
   People as PeopleIcon,
   Category as CategoryIcon,
-  Delete as DeleteIcon
+  Delete as DeleteIcon,
+  FileDownload as FileDownloadIcon
 } from '@mui/icons-material';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
@@ -40,6 +41,7 @@ const DirectorDashboard = () => {
   const [categories, setCategories] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [stats, setStats] = useState({});
+  const [allDemands, setAllDemands] = useState([]);
   const [openDialog, setOpenDialog] = useState(false);
   const [dialogType, setDialogType] = useState(''); // 'list', 'department'
   const [formData, setFormData] = useState({});
@@ -59,17 +61,19 @@ const DirectorDashboard = () => {
 
   const fetchData = async () => {
     try {
-      const [listsRes, categoriesRes, departmentsRes, statsRes] = await Promise.all([
+      const [listsRes, categoriesRes, departmentsRes, statsRes, demandsRes] = await Promise.all([
         axios.get('/api/demand-lists', axiosConfig),
         axios.get('/api/categories', axiosConfig),
         axios.get('/api/departments', axiosConfig),
-        axios.get('/api/stats', axiosConfig)
+        axios.get('/api/stats', axiosConfig),
+        axios.get('/api/demands', axiosConfig)
       ]);
 
       setDemandLists(listsRes.data);
       setCategories(categoriesRes.data);
       setDepartments(departmentsRes.data);
       setStats(statsRes.data);
+      setAllDemands(demandsRes.data);
     } catch (error) {
       console.error('Erreur lors du chargement des données:', error);
       showAlert('Erreur lors du chargement des données', 'error');
@@ -123,19 +127,166 @@ const DirectorDashboard = () => {
         showAlert('Département supprimé avec succès', 'success');
         fetchData();
       } catch (error) {
-        showAlert('Erreur lors de la suppression du département', 'error');
+        if (error.response && error.response.status === 400) {
+          showAlert(error.response.data.error || 'Impossible de supprimer ce département car il contient des utilisateurs', 'error');
+        } else {
+          showAlert('Erreur lors de la suppression du département', 'error');
+        }
       }
     }
   };
 
-  const handleToggleListStatus = async (listId, currentStatus) => {
+  const exportListToExcel = async (listId, listTitle) => {
     try {
-      const newStatus = currentStatus === 'open' ? 'closed' : 'open';
-      await axios.put(`/api/demand-lists/${listId}/status`, { status: newStatus }, axiosConfig);
-      showAlert(`Liste ${newStatus === 'open' ? 'ouverte' : 'fermée'} avec succès`, 'success');
+      // Récupérer les demandes spécifiques à cette liste
+      const response = await axios.get(`/api/demands/export/${listId}`, axiosConfig);
+      const exportDemands = response.data;
+
+      if (exportDemands.length === 0) {
+        showAlert('Aucune demande à exporter pour cette liste', 'warning');
+        return;
+      }
+
+      // Créer les données pour l'export
+      const exportData = exportDemands.map(demand => ({
+        'ID': demand.id,
+        'Titre': demand.title,
+        'Description': demand.description,
+        'Enseignant': demand.teacher_name,
+        'Département': demand.department_name || 'Non défini',
+        'Catégorie': `${demand.category_code} - ${demand.category_name}`,
+        'Quantité': demand.quantity,
+        'Prix estimé (FCFA)': new Intl.NumberFormat('fr-FR').format(demand.estimated_price),
+        'Prix total (FCFA)': new Intl.NumberFormat('fr-FR').format(demand.quantity * demand.estimated_price),
+        'Priorité': demand.priority,
+        'Statut': getStatusText(demand.status),
+        'Justification': demand.justification || '',
+        'Date de création': new Date(demand.created_at).toLocaleDateString('fr-FR'),
+        'Dernière modification': new Date(demand.updated_at).toLocaleDateString('fr-FR')
+      }));
+
+      // Calculer les statistiques pour cette liste spécifique
+      const totalEstimated = exportDemands.reduce((sum, demand) => sum + (demand.quantity * demand.estimated_price), 0);
+      const approvedTotal = exportDemands
+        .filter(demand => demand.status === 'approved_by_director')
+        .reduce((sum, demand) => sum + (demand.quantity * demand.estimated_price), 0);
+      const pendingTotal = exportDemands
+        .filter(demand => ['pending', 'approved_by_head'].includes(demand.status))
+        .reduce((sum, demand) => sum + (demand.quantity * demand.estimated_price), 0);
+      const rejectedTotal = exportDemands
+        .filter(demand => ['rejected_by_head', 'rejected_by_director'].includes(demand.status))
+        .reduce((sum, demand) => sum + (demand.quantity * demand.estimated_price), 0);
+
+      // Grouper par département pour cette liste
+      const departmentStats = {};
+      exportDemands.forEach(demand => {
+        const deptName = demand.department_name || 'Non défini';
+        if (!departmentStats[deptName]) {
+          departmentStats[deptName] = { count: 0, total: 0 };
+        }
+        departmentStats[deptName].count++;
+        departmentStats[deptName].total += (demand.quantity * demand.estimated_price);
+      });
+
+      // Grouper par catégorie pour cette liste
+      const categoryStats = {};
+      exportDemands.forEach(demand => {
+        const catKey = `${demand.category_code} - ${demand.category_name}`;
+        if (!categoryStats[catKey]) {
+          categoryStats[catKey] = { count: 0, total: 0 };
+        }
+        categoryStats[catKey].count++;
+        categoryStats[catKey].total += (demand.quantity * demand.estimated_price);
+      });
+
+      // Créer une feuille de statistiques
+      const statsData = [
+        ['=== RAPPORT DE LA LISTE ===', ''],
+        ['Nom de la liste', listTitle],
+        ['Statut de la liste', 'Fermée (définitivement)'],
+        ['Date d\'export', new Date().toLocaleDateString('fr-FR')],
+        ['Heure d\'export', new Date().toLocaleTimeString('fr-FR')],
+        ['', ''],
+        ['=== STATISTIQUES GÉNÉRALES ===', ''],
+        ['Total des demandes', exportDemands.length],
+        ['Demandes approuvées', exportDemands.filter(d => d.status === 'approved_by_director').length],
+        ['Demandes en attente', exportDemands.filter(d => ['pending', 'approved_by_head'].includes(d.status)).length],
+        ['Demandes rejetées', exportDemands.filter(d => ['rejected_by_head', 'rejected_by_director'].includes(d.status)).length],
+        ['', ''],
+        ['=== COÛTS EN FCFA ===', ''],
+        ['Total estimé toutes demandes', new Intl.NumberFormat('fr-FR').format(totalEstimated)],
+        ['Total approuvé par directeur', new Intl.NumberFormat('fr-FR').format(approvedTotal)],
+        ['Total en attente d\'approbation', new Intl.NumberFormat('fr-FR').format(pendingTotal)],
+        ['Total des demandes rejetées', new Intl.NumberFormat('fr-FR').format(rejectedTotal)],
+        ['', ''],
+        ['=== RÉPARTITION PAR DÉPARTEMENT ===', ''],
+        ...Object.entries(departmentStats).map(([deptName, stats]) => 
+          [`${deptName}`, `${stats.count} demandes - ${new Intl.NumberFormat('fr-FR').format(stats.total)} FCFA`]
+        ),
+        ['', ''],
+        ['=== RÉPARTITION PAR CATÉGORIE ===', ''],
+        ...Object.entries(categoryStats).map(([catName, stats]) => 
+          [`${catName}`, `${stats.count} demandes - ${new Intl.NumberFormat('fr-FR').format(stats.total)} FCFA`]
+        ),
+        ['', ''],
+        ['=== INFORMATIONS D\'EXPORT ===', ''],
+        ['Exporté par', 'Directeur'],
+        ['Nombre total d\'enregistrements', exportDemands.length],
+        ['Liste ID', listId]
+      ];
+
+      // Utiliser une solution simple pour créer un CSV (compatible Excel)
+      const csvContent = [
+        // En-têtes
+        Object.keys(exportData[0] || {}).join(';'),
+        // Données des demandes
+        ...exportData.map(row => Object.values(row).map(val => `"${val || ''}"`).join(';')),
+        '',
+        // Statistiques
+        ...statsData.map(row => row.join(';'))
+      ].join('\n');
+
+      // Créer et télécharger le fichier
+      const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      const sanitizedTitle = listTitle.replace(/[^a-zA-Z0-9]/g, '_');
+      link.download = `rapport_liste_${sanitizedTitle}_${new Date().toISOString().split('T')[0]}.csv`;
+      link.click();
+      
+      showAlert(`Fichier exporté avec succès pour "${listTitle}" (${exportDemands.length} demandes, ${new Intl.NumberFormat('fr-FR').format(totalEstimated)} FCFA total)`, 'success');
+    } catch (error) {
+      console.error('Erreur lors de l\'export:', error);
+      if (error.response && error.response.status === 404) {
+        showAlert('Aucune demande trouvée pour cette liste', 'warning');
+      } else if (error.response && error.response.status === 403) {
+        showAlert('Cette liste n\'est pas encore fermée ou vous n\'avez pas les droits', 'error');
+      } else {
+        showAlert('Erreur lors de l\'export du fichier', 'error');
+      }
+    }
+  };
+
+  const getStatusText = (status) => {
+    const statusMap = {
+      'pending': 'En attente',
+      'approved_by_head': 'Approuvé par chef de département',
+      'rejected_by_head': 'Rejeté par chef de département',
+      'approved_by_director': 'Approuvé par directeur',
+      'rejected_by_director': 'Rejeté par directeur'
+    };
+    return statusMap[status] || status;
+  };
+
+  // Fermer définitivement une liste (plus de réouverture possible)
+  const handleToggleListStatus = async (listId, currentStatus) => {
+    if (currentStatus !== 'open') return; // Ne jamais rouvrir une liste fermée
+    try {
+      await axios.put(`/api/demand-lists/${listId}/status`, { status: 'closed' }, axiosConfig);
+      showAlert('Liste fermée définitivement avec succès', 'success');
       fetchData();
     } catch (error) {
-      showAlert('Erreur lors de la mise à jour du statut', 'error');
+      showAlert('Erreur lors de la fermeture de la liste', 'error');
     }
   };
 
@@ -332,6 +483,7 @@ const DirectorDashboard = () => {
                   <TableCell>Date limite</TableCell>
                   <TableCell>Statut</TableCell>
                   <TableCell>Actions</TableCell>
+                  <TableCell>Export</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -350,12 +502,38 @@ const DirectorDashboard = () => {
                       />
                     </TableCell>
                     <TableCell>
-                      <Tooltip title={list.status === 'open' ? 'Fermer' : 'Ouvrir'}>
-                        <IconButton
-                          onClick={() => handleToggleListStatus(list.id, list.status)}
-                        >
-                          {list.status === 'open' ? <CloseIcon /> : <EditIcon />}
-                        </IconButton>
+                      {list.status === 'open' ? (
+                        <Tooltip title="Fermer définitivement">
+                          <IconButton
+                            onClick={() => handleToggleListStatus(list.id, list.status)}
+                            color="error"
+                          >
+                            <CloseIcon />
+                          </IconButton>
+                        </Tooltip>
+                      ) : (
+                        <Tooltip title="Gérer les validations de cette liste">
+                          <IconButton
+                            onClick={() => navigate(`/demands-review/${list.id}`)}
+                            color="primary"
+                          >
+                            <EditIcon />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Tooltip title={list.status === 'closed' ? 'Exporter les demandes de cette liste' : 'Export disponible après fermeture'}>
+                        <span>
+                          <IconButton
+                            onClick={() => exportListToExcel(list.id, list.title)}
+                            color="success"
+                            size="small"
+                            disabled={list.status !== 'closed'}
+                          >
+                            <FileDownloadIcon fontSize="small" />
+                          </IconButton>
+                        </span>
                       </Tooltip>
                     </TableCell>
                   </TableRow>
@@ -434,6 +612,11 @@ const DirectorDashboard = () => {
                                 }
                               </Typography>
                             )}
+                            {department.user_count > 0 && (
+                              <Typography variant="caption" color="warning.main" sx={{ display: 'block', fontWeight: 'bold' }}>
+                                {department.user_count} utilisateur(s) associé(s)
+                              </Typography>
+                            )}
                           </Box>
                         </TableCell>
                         <TableCell>
@@ -449,7 +632,8 @@ const DirectorDashboard = () => {
                             onClick={() => handleDeleteDepartment(department.id)}
                             color="error"
                             size="small"
-                            title="Supprimer"
+                            title={department.user_count > 0 ? "Impossible de supprimer : utilisateurs associés" : "Supprimer"}
+                            disabled={department.user_count > 0}
                           >
                             <DeleteIcon fontSize="small" />
                           </IconButton>

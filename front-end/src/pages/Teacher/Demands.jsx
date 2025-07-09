@@ -37,6 +37,12 @@ import {
 import axios from 'axios';
 
 const TeacherDemands = () => {
+  // Fonction utilitaire pour format FCFA
+  const formatFCFA = (amount) => {
+    if (amount === null || amount === undefined || isNaN(Number(amount))) return '';
+    return new Intl.NumberFormat('fr-FR').format(Number(amount)) + ' FCFA';
+  };
+
   const [demands, setDemands] = useState([]);
   const [demandLists, setDemandLists] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -225,7 +231,7 @@ const TeacherDemands = () => {
                     <TableCell>{demand.category_name}</TableCell>
                     <TableCell>{demand.quantity}</TableCell>
                     <TableCell>
-                      {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(demand.estimated_price)}
+                      {formatFCFA(demand.estimated_price)}
                     </TableCell>
                     <TableCell>
                       <Chip
@@ -281,7 +287,7 @@ const TeacherDemands = () => {
                     <TableCell>{demand.title}</TableCell>
                     <TableCell>{demand.category_name}</TableCell>
                     <TableCell>
-                      {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(demand.estimated_price)}
+                      {formatFCFA(demand.estimated_price)}
                     </TableCell>
                     <TableCell>
                       <Chip
@@ -373,7 +379,7 @@ const TeacherDemands = () => {
                 <TextField
                   fullWidth
                   type="number"
-                  label="Prix estimé (€)"
+                  label="Prix estimé (FCFA)"
                   value={formData.estimated_price}
                   onChange={(e) => handleInputChange('estimated_price', parseFloat(e.target.value))}
                   inputProps={{ min: 0, step: 0.01 }}
@@ -454,7 +460,7 @@ const TeacherDemands = () => {
                 <Grid item xs={12} md={4}>
                   <Typography variant="body2" color="text.secondary">Prix estimé</Typography>
                   <Typography variant="body1">
-                    {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(selectedDemand.estimated_price)}
+                    {formatFCFA(selectedDemand.estimated_price)}
                   </Typography>
                 </Grid>
                 <Grid item xs={12} md={4}>

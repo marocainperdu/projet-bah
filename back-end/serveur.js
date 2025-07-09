@@ -4,6 +4,7 @@ const mysql = require("mysql2");
 const cors = require("cors");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const nodemailer = require("nodemailer");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -41,6 +42,61 @@ db.connect((err) => {
     }
     console.log('Connecté à la base de données MySQL');
 });
+
+// Configuration du transporteur email
+const transporter = nodemailer.createTransporter({
+    host: process.env.EMAIL_HOST || 'localhost',
+    port: process.env.EMAIL_PORT || 587,
+    secure: false, // true pour 465, false pour les autres ports
+    auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
+    }
+});
+
+// Fonction pour envoyer un email de bienvenue
+const sendWelcomeEmail = async (userEmail, userName, userRole, temporaryPassword) => {
+    const roleNames = {
+        'director': 'Directeur',
+        'department_head': 'Chef de département',
+        'teacher': 'Enseignant'
+    };
+
+    const mailOptions = {
+        from: process.env.EMAIL_FROM || process.env.EMAIL_USER,
+        to: userEmail,
+        subject: 'Bienvenue sur la plateforme de gestion des demandes',
+        html: `
+            <h2>Bienvenue sur la plateforme de gestion des demandes</h2>
+            <p>Bonjour <strong>${userName}</strong>,</p>
+            <p>Votre compte a été créé avec succès sur la plateforme de gestion des demandes.</p>
+            <p><strong>Détails de votre compte :</strong></p>
+            <ul>
+                <li><strong>Email :</strong> ${userEmail}</li>
+                <li><strong>Rôle :</strong> ${roleNames[userRole] || userRole}</li>
+                <li><strong>Mot de passe :</strong> ${temporaryPassword}</li>
+            </ul>
+            <p><strong>Prochaines étapes :</strong></p>
+            <ol>
+                <li>Connectez-vous à la plateforme avec vos identifiants</li>
+                <li>Changez votre mot de passe temporaire lors de votre première connexion</li>
+                <li>Explorez les fonctionnalités disponibles selon votre rôle</li>
+            </ol>
+            <p><strong>Lien de connexion :</strong> <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/login">Se connecter</a></p>
+            <p>Si vous avez des questions, n'hésitez pas à contacter l'administrateur.</p>
+            <p>Cordialement,<br>L'équipe de gestion des demandes</p>
+        `
+    };
+
+    try {
+        await transporter.sendMail(mailOptions);
+        console.log(`Email de bienvenue envoyé à ${userEmail}`);
+        return true;
+    } catch (error) {
+        console.error('Erreur lors de l\'envoi de l\'email:', error);
+        return false;
+    }
+};
 
 // Middleware d'authentification
 const authenticateToken = (req, res, next) => {
@@ -95,6 +151,53 @@ app.post("/api/register", async (req, res) => {
     } catch (error) {
         res.status(500).json({ error: "Erreur serveur" });
     }
+});
+
+// Récupérer toutes les demandes d'une liste pour consultation/validation directeur
+app.get("/api/demand-lists/:id/demands", authenticateToken, (req, res) => {
+    if (req.user.role !== 'director') {
+        return res.status(403).json({ error: "Accès réservé au directeur" });
+    }
+    const listId = req.params.id;
+    const query = `
+        SELECT d.*, u.name as teacher_name, c.name as category_name, c.code as category_code, dept.name as department_name
+        FROM demands d
+        JOIN users u ON d.teacher_id = u.id
+        JOIN categories c ON d.category_id = c.id
+        LEFT JOIN departments dept ON u.department_id = dept.id
+        WHERE d.demand_list_id = ?
+        ORDER BY d.created_at DESC
+    `;
+    db.query(query, [listId], (err, results) => {
+        if (err) {
+            return res.status(500).json({ error: "Erreur serveur" });
+        }
+        res.json(results);
+    });
+});
+
+app.get("/api/demands/export/sum/:listId", authenticateToken, (req, res) => {
+    if (req.user.role !== 'director') {
+        return res.status(403).json({ error: "Seuls les directeurs peuvent exporter les demandes" });
+    }
+
+    const listId = req.params.listId;
+    // On ne filtre que les demandes de la liste, et on groupe par catégorie (code + nom)
+    const query = `
+        SELECT c.code as category_code, c.name as category_name, 
+               SUM(d.estimated_price * d.quantity) as total_cost
+        FROM demands d
+        JOIN categories c ON d.category_id = c.id
+        WHERE d.demand_list_id = ?
+        GROUP BY c.code, c.name
+        ORDER BY c.code
+    `;
+    db.query(query, [listId], (err, results) => {
+        if (err) {
+            return res.status(500).json({ error: "Erreur serveur" });
+        }
+        res.json(results);
+    });
 });
 
 app.post("/api/login", (req, res) => {
@@ -227,6 +330,169 @@ app.delete("/api/departments/:id", authenticateToken, (req, res) => {
             }
             res.json({ message: "Département supprimé avec succès" });
         });
+    });
+});
+
+// Routes pour la gestion des utilisateurs
+app.get("/api/users", authenticateToken, (req, res) => {
+    if (req.user.role !== 'director') {
+        return res.status(403).json({ error: "Accès non autorisé" });
+    }
+
+    const query = `
+        SELECT u.id, u.email, u.name, u.role, u.department_id, d.name as department_name
+        FROM users u
+        LEFT JOIN departments d ON u.department_id = d.id
+        ORDER BY u.name
+    `;
+    
+    db.query(query, (err, results) => {
+        if (err) {
+            return res.status(500).json({ error: "Erreur serveur" });
+        }
+        res.json(results);
+    });
+});
+
+app.post("/api/users", authenticateToken, async (req, res) => {
+    if (req.user.role !== 'director') {
+        return res.status(403).json({ error: "Accès non autorisé" });
+    }
+
+    const { name, email, password, role, department_id } = req.body;
+    
+    if (!name || !email || !password || !role) {
+        return res.status(400).json({ error: "Tous les champs obligatoires doivent être remplis" });
+    }
+
+    // Vérifier si l'email existe déjà
+    const checkEmailQuery = "SELECT id FROM users WHERE email = ?";
+    db.query(checkEmailQuery, [email], async (err, results) => {
+        if (err) {
+            return res.status(500).json({ error: "Erreur serveur" });
+        }
+        
+        if (results.length > 0) {
+            return res.status(400).json({ error: "Cette adresse email est déjà utilisée" });
+        }
+
+        // Hasher le mot de passe
+        try {
+            const hashedPassword = await bcrypt.hash(password, 10);
+            const insertQuery = "INSERT INTO users (name, email, password, role, department_id) VALUES (?, ?, ?, ?, ?)";
+            const values = [name, email, hashedPassword, role, department_id || null];
+            
+            db.query(insertQuery, values, async (err, results) => {
+                if (err) {
+                    return res.status(500).json({ error: "Erreur lors de la création de l'utilisateur" });
+                }
+                
+                // Envoyer l'email de bienvenue
+                const emailSent = await sendWelcomeEmail(email, name, role, password);
+                
+                const response = {
+                    message: "Utilisateur créé avec succès",
+                    id: results.insertId
+                };
+                
+                if (emailSent) {
+                    response.emailSent = true;
+                    response.emailMessage = "Un email de bienvenue a été envoyé à l'utilisateur";
+                } else {
+                    response.emailSent = false;
+                    response.emailMessage = "Utilisateur créé mais l'email n'a pas pu être envoyé";
+                }
+                
+                res.status(201).json(response);
+            });
+        } catch (error) {
+            return res.status(500).json({ error: "Erreur lors du hashage du mot de passe" });
+        }
+    });
+});
+
+app.put("/api/users/:id", authenticateToken, (req, res) => {
+    if (req.user.role !== 'director') {
+        return res.status(403).json({ error: "Accès non autorisé" });
+    }
+
+    const { name, email, password, role, department_id } = req.body;
+    const userId = req.params.id;
+    
+    if (!name || !email || !role) {
+        return res.status(400).json({ error: "Les champs nom, email et rôle sont obligatoires" });
+    }
+
+    // Vérifier si l'email existe déjà pour un autre utilisateur
+    const checkEmailQuery = "SELECT id FROM users WHERE email = ? AND id != ?";
+    db.query(checkEmailQuery, [email, userId], (err, results) => {
+        if (err) {
+            return res.status(500).json({ error: "Erreur serveur" });
+        }
+        
+        if (results.length > 0) {
+            return res.status(400).json({ error: "Cette adresse email est déjà utilisée" });
+        }
+
+        // Fonction pour mettre à jour l'utilisateur
+        const updateUser = (hashedPassword = null) => {
+            let updateQuery = "UPDATE users SET name = ?, email = ?, role = ?, department_id = ?";
+            let values = [name, email, role, department_id || null];
+            
+            if (hashedPassword) {
+                updateQuery += ", password = ?";
+                values.push(hashedPassword);
+            }
+            
+            updateQuery += " WHERE id = ?";
+            values.push(userId);
+            
+            db.query(updateQuery, values, (err, results) => {
+                if (err) {
+                    return res.status(500).json({ error: "Erreur lors de la mise à jour de l'utilisateur" });
+                }
+                if (results.affectedRows === 0) {
+                    return res.status(404).json({ error: "Utilisateur non trouvé" });
+                }
+                res.json({ message: "Utilisateur mis à jour avec succès" });
+            });
+        };
+
+        // Si un nouveau mot de passe est fourni, le hasher
+        if (password) {
+            bcrypt.hash(password, 10, (err, hashedPassword) => {
+                if (err) {
+                    return res.status(500).json({ error: "Erreur lors du hashage du mot de passe" });
+                }
+                updateUser(hashedPassword);
+            });
+        } else {
+            updateUser();
+        }
+    });
+});
+
+app.delete("/api/users/:id", authenticateToken, (req, res) => {
+    if (req.user.role !== 'director') {
+        return res.status(403).json({ error: "Accès non autorisé" });
+    }
+
+    const userId = req.params.id;
+    
+    // Empêcher la suppression de son propre compte
+    if (userId == req.user.userId) {
+        return res.status(400).json({ error: "Vous ne pouvez pas supprimer votre propre compte" });
+    }
+
+    const deleteQuery = "DELETE FROM users WHERE id = ?";
+    db.query(deleteQuery, [userId], (err, results) => {
+        if (err) {
+            return res.status(500).json({ error: "Erreur lors de la suppression de l'utilisateur" });
+        }
+        if (results.affectedRows === 0) {
+            return res.status(404).json({ error: "Utilisateur non trouvé" });
+        }
+        res.json({ message: "Utilisateur supprimé avec succès" });
     });
 });
 
@@ -407,6 +673,76 @@ app.put("/api/demand-lists/:id/status", authenticateToken, (req, res) => {
 });
 
 // Routes pour les demandes
+app.get("/api/demands/export/:listId", authenticateToken, (req, res) => {
+    if (req.user.role !== 'director') {
+        return res.status(403).json({ error: "Seuls les directeurs peuvent exporter les demandes" });
+    }
+
+    const listId = req.params.listId;
+
+    // Vérifier d'abord que la liste est fermée
+    const checkListQuery = "SELECT status FROM demand_lists WHERE id = ?";
+    db.query(checkListQuery, [listId], (err, listResult) => {
+        if (err) {
+            return res.status(500).json({ error: "Erreur serveur" });
+        }
+        
+        if (listResult.length === 0) {
+            return res.status(404).json({ error: "Liste de demandes non trouvée" });
+        }
+        
+        if (listResult[0].status !== 'closed') {
+            return res.status(403).json({ error: "La liste doit être fermée pour permettre l'export" });
+        }
+
+        // Récupérer les demandes de cette liste spécifique
+        const query = `
+            SELECT d.*, dl.title as list_title, u.name as teacher_name, 
+                   c.name as category_name, c.code as category_code,
+                   dept.name as department_name
+            FROM demands d
+            JOIN demand_lists dl ON d.demand_list_id = dl.id
+            JOIN users u ON d.teacher_id = u.id
+            JOIN categories c ON d.category_id = c.id
+            LEFT JOIN departments dept ON u.department_id = dept.id
+            WHERE d.demand_list_id = ?
+            ORDER BY d.created_at DESC
+        `;
+        
+        db.query(query, [listId], (err, results) => {
+            if (err) {
+                return res.status(500).json({ error: "Erreur serveur" });
+            }
+            res.json(results);
+        });
+    });
+});
+
+app.get("/api/demands/export", authenticateToken, (req, res) => {
+    if (req.user.role !== 'director') {
+        return res.status(403).json({ error: "Seuls les directeurs peuvent exporter toutes les demandes" });
+    }
+
+    const query = `
+        SELECT d.*, dl.title as list_title, u.name as teacher_name, 
+               c.name as category_name, c.code as category_code,
+               dept.name as department_name
+        FROM demands d
+        JOIN demand_lists dl ON d.demand_list_id = dl.id
+        JOIN users u ON d.teacher_id = u.id
+        JOIN categories c ON d.category_id = c.id
+        LEFT JOIN departments dept ON u.department_id = dept.id
+        ORDER BY d.created_at DESC
+    `;
+    
+    db.query(query, (err, results) => {
+        if (err) {
+            return res.status(500).json({ error: "Erreur serveur" });
+        }
+        res.json(results);
+    });
+});
+
 app.get("/api/demands", authenticateToken, (req, res) => {
     let query = `
         SELECT d.*, dl.title as list_title, u.name as teacher_name, 

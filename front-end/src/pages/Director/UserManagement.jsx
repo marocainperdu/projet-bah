@@ -147,8 +147,12 @@ function UserManagement() {
                 setSuccess('Utilisateur modifié avec succès');
             } else {
                 // Création
-                await axios.post('/api/users', formData, config);
-                setSuccess('Utilisateur créé avec succès');
+                const response = await axios.post('/api/users', formData, config);
+                if (response.data.emailSent) {
+                    setSuccess(`Utilisateur créé avec succès. ${response.data.emailMessage}`);
+                } else {
+                    setSuccess(`Utilisateur créé avec succès. ${response.data.emailMessage || 'Email non envoyé'}`);
+                }
             }
             
             fetchUsers();
